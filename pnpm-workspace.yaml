@@ -1,0 +1,5 @@
+packages:
+  - packages/*
+  - apps/dmvd
+  # vs-hub's app lives in frontend/, not at its repo root
+  - apps/vs-hub/frontend
