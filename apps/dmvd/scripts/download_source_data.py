@@ -1,0 +1,368 @@
+#!/usr/bin/env python3
+"""
+Downloads repo_sources files from https://raw.githubusercontent.com/{repo}/{commit}/{file_path}
+Downloads gsheet_sources from {google_sheet}
+
+Saves to {local_source_dir}/{dependency_name}/{file_name}
+Handles errors if files don't exist
+Prints what it's fetching
+
+After downloading bdchm.yaml, runs transform_schema.py to produce
+bdchm.processed.json. That reads bdchm.yaml directly through LinkML's SchemaView
+(see induced_schema.py), which resolves imports and merges inherited slots
+itself — so there is no gen-linkml step and no bdchm.expanded.json artifact.
+
+Usage:
+  python download_source_data.py              # Download all files and run full pipeline
+  python download_source_data.py --metadata-only   # Skip downloads, just regenerate schemas from existing bdchm.yaml
+  python download_source_data.py --check      # Check if repo sources are up to date
+  python download_source_data.py --update     # Update to latest commits and download
+"""
+
+import sys
+import json
+import argparse
+from pathlib import Path
+from urllib import request
+from urllib.error import URLError, HTTPError
+
+try:
+    import yaml
+except ImportError:
+    print("Error: PyYAML is required. Install with: pip install pyyaml", file=sys.stderr)
+    sys.exit(1)
+
+
+local_source_dir = "public/source_data"
+repo_sources = {
+    "HM": {         # dependency_name
+        "repo": "RTIInternational/NHLBI-BDC-DMC-HM",
+        "commit": "d3c7c58",
+        "file_paths": [
+          "src/bdchm/schema/bdchm.yaml"
+        ],
+    },
+    "HV": {         # dependency_name
+        "googlesheet": "https://docs.google.com/spreadsheets/d/1PDaX266_H0haa0aabMYQ6UNtEKT5-ClMarP0FvNntN8/edit?gid=0#gid=0",
+        "file_name": "variable-specs-S1.tsv"
+    }
+}
+
+
+def get_latest_commit(repo: str, branch: str = "main") -> str | None:
+    """
+    Get the latest commit SHA from a GitHub repository.
+
+    Args:
+        repo: Repository in format "owner/repo"
+        branch: Branch name (default: main)
+
+    Returns:
+        Short commit SHA (7 chars) or None if failed
+    """
+    api_url = f"https://api.github.com/repos/{repo}/commits/{branch}"
+    try:
+        req = request.Request(api_url, headers={"Accept": "application/vnd.github.v3+json"})
+        with request.urlopen(req) as response:
+            data = json.loads(response.read().decode())
+            return data["sha"][:7]
+    except Exception as e:
+        print(f"  ✗ Failed to get latest commit for {repo}: {e}", file=sys.stderr)
+        return None
+
+
+def check_for_updates() -> dict[str, tuple[str, str]]:
+    """
+    Check if any repo sources have newer commits available.
+
+    Returns:
+        Dict of {dep_name: (current_commit, latest_commit)} for outdated repos
+    """
+    outdated = {}
+    for dep_name, config in repo_sources.items():
+        if "repo" not in config:
+            continue
+        repo = config["repo"]
+        current = config["commit"]
+        latest = get_latest_commit(repo)
+        if latest and latest != current:
+            outdated[dep_name] = (current, latest)
+    return outdated
+
+
+def update_commit_in_script(dep_name: str, new_commit: str) -> bool:
+    """
+    Update the commit hash for a dependency in this script file.
+
+    Args:
+        dep_name: Dependency name (e.g., "HM")
+        new_commit: New commit hash to use
+
+    Returns:
+        True if successful
+    """
+    script_path = Path(__file__)
+    content = script_path.read_text()
+
+    # Find and replace the commit for this dependency
+    # Look for pattern: "dep_name": { ... "commit": "...", ...
+    import re
+    pattern = rf'("{dep_name}":\s*\{{\s*[^}}]*"commit":\s*")[a-f0-9]+"'
+    replacement = rf'\g<1>{new_commit}"'
+    new_content, count = re.subn(pattern, replacement, content, flags=re.DOTALL)
+
+    if count == 0:
+        print(f"  ✗ Could not find commit for {dep_name} in script", file=sys.stderr)
+        return False
+
+    script_path.write_text(new_content)
+    return True
+
+
+def download_file(url: str, output_path: Path, normalize_line_endings: bool = False) -> bool:
+    """
+    Download a file from URL to output_path.
+
+    Args:
+        url: URL to download from
+        output_path: Local path to save the file
+        normalize_line_endings: If True, convert to Unix line endings (LF)
+
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        print(f"Fetching {url}...")
+        with request.urlopen(url) as response:
+            content = response.read()
+
+        # Normalize line endings if requested (for text files like TSV)
+        if normalize_line_endings:
+            content = content.replace(b'\r\n', b'\n').replace(b'\r', b'\n')
+
+        # Ensure parent directory exists
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Write file
+        output_path.write_bytes(content)
+        print(f"  ✓ Saved to {output_path} ({len(content):,} bytes)")
+        return True
+
+    except HTTPError as e:
+        print(f"  ✗ HTTP error {e.code}: {e.reason}", file=sys.stderr)
+        return False
+    except URLError as e:
+        print(f"  ✗ URL error: {e.reason}", file=sys.stderr)
+        return False
+    except Exception as e:
+        print(f"  ✗ Error: {e}", file=sys.stderr)
+        return False
+
+
+def transform_schema(yaml_path: Path, processed_path: Path) -> bool:
+    """
+    Transform bdchm.yaml to optimized bdchm.processed.json.
+    Computes inherited_from fields and creates slot instances for slot_usage overrides.
+
+    Args:
+        yaml_path: Path to bdchm.yaml
+        processed_path: Path to save bdchm.processed.json
+
+    Returns:
+        True if successful, False otherwise
+    """
+    import subprocess
+    try:
+        print(f"Transforming schema to optimized format...")
+
+        # Call transform_schema.py
+        script_path = Path(__file__).parent / "transform_schema.py"
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(script_path),
+                '--input', str(yaml_path),
+                '--output', str(processed_path)
+            ],
+            capture_output=True,
+            text=True
+        )
+
+        # Print output (includes progress and summary)
+        if result.stdout:
+            print(result.stdout, end='')
+
+        if result.returncode != 0:
+            if result.stderr:
+                print(result.stderr, file=sys.stderr)
+            return False
+
+        if not processed_path.exists():
+            print(f"  ✗ transform_schema.py did not create output file", file=sys.stderr)
+            return False
+
+        return True
+
+    except FileNotFoundError as e:
+        print(f"  ✗ Script not found: {e}", file=sys.stderr)
+        return False
+    except Exception as e:
+        print(f"  ✗ Error transforming schema: {e}", file=sys.stderr)
+        return False
+
+
+def main():
+    """Download all configured source files."""
+    parser = argparse.ArgumentParser(
+        description="Download source data and run schema processing pipeline",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python download_source_data.py              # Download all files and run full pipeline
+  python download_source_data.py --metadata-only   # Skip downloads, regenerate schemas only
+        """
+    )
+    parser.add_argument(
+        '--metadata-only',
+        action='store_true',
+        help='Skip downloads and only regenerate bdchm.processed.json from existing bdchm.yaml'
+    )
+    parser.add_argument(
+        '--check',
+        action='store_true',
+        help='Check if repo sources are up to date with their remote repositories'
+    )
+    parser.add_argument(
+        '--update',
+        action='store_true',
+        help='Update to latest commits and download (modifies this script)'
+    )
+    args = parser.parse_args()
+
+    # Handle --check flag
+    if args.check:
+        print("Checking for updates...")
+        outdated = check_for_updates()
+        if outdated:
+            print("\nUpdates available:")
+            for dep_name, (current, latest) in outdated.items():
+                repo = repo_sources[dep_name]["repo"]
+                print(f"  {dep_name} ({repo}): {current} → {latest}")
+            print("\nRun with --update to update and download.")
+            return 1
+        else:
+            print("All repo sources are up to date.")
+            return 0
+
+    # Handle --update flag
+    if args.update:
+        print("Checking for updates...")
+        outdated = check_for_updates()
+        if not outdated:
+            print("All repo sources are up to date.")
+        else:
+            print("\nUpdating commits:")
+            for dep_name, (current, latest) in outdated.items():
+                repo = repo_sources[dep_name]["repo"]
+                print(f"  {dep_name} ({repo}): {current} → {latest}")
+                if update_commit_in_script(dep_name, latest):
+                    print(f"    ✓ Updated in script")
+                    # Update in-memory config for this run
+                    repo_sources[dep_name]["commit"] = latest
+                else:
+                    print(f"    ✗ Failed to update")
+                    return 1
+        # Continue to download with updated commits
+
+    project_root = Path(__file__).parent.parent
+    source_dir = project_root / local_source_dir
+
+    success_count = 0
+    fail_count = 0
+    yaml_path = None
+
+    # Download repo sources (skip if --metadata-only)
+    if args.metadata_only:
+        print("Skipping downloads (--metadata-only mode)")
+        # Find existing YAML file
+        yaml_path = source_dir / "HM" / "bdchm.yaml"
+        if not yaml_path.exists():
+            print(f"  ✗ Error: {yaml_path} not found. Run without --metadata-only first.", file=sys.stderr)
+            return 1
+    else:
+        for dep_name, config in repo_sources.items():
+            if "repo" in config:
+                repo = config["repo"]
+                commit = config["commit"]
+                file_paths = config["file_paths"]
+
+                for file_path in file_paths:
+                    url = f"https://raw.githubusercontent.com/{repo}/{commit}/{file_path}"
+                    file_name = Path(file_path).name
+                    output_path = source_dir / dep_name / file_name
+
+                    if download_file(url, output_path):
+                        success_count += 1
+                        # Track YAML file for metadata generation
+                        if file_name == "bdchm.yaml":
+                            yaml_path = output_path
+                    else:
+                        fail_count += 1
+
+            elif "googlesheet" in config:
+                # Convert Google Sheets URL to TSV export URL
+                sheet_url = config["googlesheet"]
+                file_name = config["file_name"]
+
+                # Extract sheet ID from URL
+                # Format: https://docs.google.com/spreadsheets/d/{SHEET_ID}/edit?gid={GID}#gid={GID}
+                #   "https://docs.google.com/spreadsheets/d/1PDaX266_H0haa0aabMYQ6UNtEKT5-ClMarP0FvNntN8/edit?gid=0#gid=0",
+                if "/d/" in sheet_url and "/edit" in sheet_url:
+                    sheet_id = sheet_url.split("/d/")[1].split("/")[0]
+                    gid = "0"  # default to first sheet
+                    if "gid=" in sheet_url:
+                        gid = sheet_url.split("gid=")[1].split("#")[0].split("&")[0]
+
+                    # Construct export URL for TSV format.
+                    # Google's export endpoint started rejecting requests that
+                    # include a gid param (HTTP 400, observed 2026-08); without
+                    # it, it exports the first visible sheet — equivalent for
+                    # gid=0. Keep gid for non-default tabs and hope Google
+                    # fixes the endpoint (no known workaround as of 2026-08).
+                    export_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=tsv"
+                    if gid != "0":
+                        export_url += f"&gid={gid}"
+                    output_path = source_dir / dep_name / file_name
+
+                    # TSV files should use Unix line endings
+                    if download_file(export_url, output_path, normalize_line_endings=True):
+                        success_count += 1
+                    else:
+                        fail_count += 1
+                else:
+                    print(f"  ✗ Invalid Google Sheets URL format: {sheet_url}", file=sys.stderr)
+                    fail_count += 1
+
+    # Regenerate the processed schema from YAML if available. SchemaView reads
+    # bdchm.yaml directly, so this is a single step.
+    if yaml_path and yaml_path.exists():
+        processed_path = yaml_path.parent / "bdchm.processed.json"
+        if transform_schema(yaml_path, processed_path):
+            success_count += 1
+        else:
+            fail_count += 1
+
+    # Summary
+    print("\n" + "="*60)
+    print(f"Downloaded/Generated: {success_count} file(s)")
+    if fail_count > 0:
+        print(f"Failed: {fail_count} file(s)")
+        print("="*60)
+        return 1
+
+    print("="*60)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

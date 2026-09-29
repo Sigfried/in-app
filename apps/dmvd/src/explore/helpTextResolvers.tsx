@@ -1,0 +1,214 @@
+/**
+ * dmvd's TEXT resolvers: what a `{{kind:arg}}` placeholder in help content is
+ * replaced with.
+ *
+ * The same seam as `helpResolvers.ts`, for the same reason. Resolving
+ * `{{model-description:Participant}}` means knowing what a BDCHM class is,
+ * which `src/help/` must not (docs/HELP_PACKAGE_PLAN.md); the package only
+ * knows how to find `{{kind:arg}}` and hand `arg` to whoever registered
+ * `kind`. These are handed to `<HelpProvider textResolvers={...}>`.
+ *
+ * **Why placeholders rather than deriving text from the step's `Anchor:`.**
+ * Siggie, 2026-09-08: "i prefer explicit". A step anchored at
+ * `entity-row:Participant` could have silently gained that class's
+ * description, which is less to type but hides where the text came from and
+ * has no answer for a step with no anchor. A placeholder says so at the point
+ * the text lands, and composes with authored prose around it — you can write
+ * a sentence of framing and then drop the model's own words in beneath it,
+ * which a whole-field override could not do.
+ *
+ * | Kind | Fills with |
+ * |---|---|
+ * | `{{model-description:<Class>}}` | that class's `description` from the schema |
+ * | `{{enum-description:<Enum>}}` | that enumeration's `description` |
+ * | `{{category-label:<id>}}` | a category's display label (`admin` → "Admin / Study") |
+ * | `{{ownership-count:<key>}}` | a live count: `declared`/`forward`/`backward`, or `<rule-id>.<owners\|attrs\|owned\|total>` |
+ * | `{{schema-count:<key>}}` | a live whole-schema total; the fields of `SchemaCounts` |
+ *
+ * **Returning undefined leaves the placeholder standing**, visibly, in the
+ * popover. That is the designed behaviour for a name the schema no longer has
+ * — an upstream sync renaming a class is exactly the drift this has to
+ * survive, and a literal `{{model-description:Gone}}` on screen names the
+ * missing thing where a silently empty popover would hide it. `helpContent`
+ * tests assert every placeholder in the content file resolves, so the drift
+ * shows up as a red test first.
+ */
+
+import type { DataService } from '../services/DataService';
+import type { OwnershipRule } from '../models/ownershipRules';
+import { ENTITY_CATEGORIES } from '../config/entityCategories';
+import { RANGE_COLORS, SIBLING_COLORS } from '../config/appConfig';
+import EdgeSample from './EdgeSample';
+import LoopIcon, { LOOP_TITLE } from './LoopIcon';
+import { EDGE_STYLE, type DrawnKind } from './edgeStyle';
+
+/**
+ * An empty description is a MISS, not a hit.
+ *
+ * `getClassDescription` returns `''` both for "no such class" and for "a class
+ * the schema documents with nothing" — indistinguishable here, and in both
+ * cases substituting the empty string would silently delete the placeholder
+ * and leave a step with a hole in its prose. Leaving the placeholder visible
+ * says which class has no description, which is a schema gap worth seeing.
+ */
+const nonEmpty = (s: string | undefined): string | undefined =>
+  s && s.trim() ? s.trim() : undefined;
+
+export function helpTextResolvers(dataService: DataService) {
+  return {
+    'model-description': (classId: string) =>
+      nonEmpty(dataService.getClassDescription(classId)),
+
+    'enum-description': (enumId: string) =>
+      nonEmpty(dataService.getEnumDetail(enumId)?.description),
+
+    /* The LABEL, not the id: content says `{{category-label:admin}}` and gets
+       "Admin / Study", so a category renamed in config does not leave stale
+       prose in the tour. Read from the config rather than from
+       `getCategoryGroups()` so it still resolves for a category whose classes
+       are all missing — the label is a fact about the config either way. */
+    'category-label': (id: string) =>
+      nonEmpty(ENTITY_CATEGORIES.find(c => c.id === id)?.label),
+
+    /*
+     * `{{edge:own-fwd}}` — the arrow as the canvas draws it, inline in prose.
+     * Resolves to a markdown image whose URL names a WIDGET; the help layer
+     * hands `widget:` images to the host's widget map (see `helpWidgets`),
+     * which draws an `EdgeSample`. The alt text is the legend's label, so a
+     * reader without the widget still gets "A owns B". An unknown kind stays
+     * a visible placeholder, like every other resolver here.
+     */
+    'edge': (kind: string) =>
+      kind in EDGE_STYLE.kinds
+        ? `![${EDGE_STYLE.kinds[kind as DrawnKind].label}](widget:edge:${kind})`
+        : undefined,
+
+    /*
+     * `{{ownership-count:<key>}}` — a LIVE count, so prose can quote a number
+     * without transcribing it.
+     *
+     * The staleness this exists to end is not hypothetical: the tour said "38
+     * of the attributes in this model" as a hand-copied number that a rule
+     * change had already falsified (the forward count is 89), and the round of
+     * doc work ABOUT stale counts turned up three more. Any number a schema
+     * sync can move should be computed at render.
+     *
+     * Keys are either a schema-wide total — `declared`, `forward`, `backward`
+     * — or `<rule-id>.<owners|attrs|owned|total>`. An unknown key returns
+     * undefined and so leaves the placeholder visible, which is the point: a
+     * rule id that a classification change retires names itself on screen and
+     * fails the content test, rather than quietly rendering nothing.
+     */
+    'ownership-count': (key: string) => {
+      const counts = dataService.getOwnershipCounts();
+      const dot = key.lastIndexOf('.');
+      if (dot === -1) {
+        const total = counts[key as 'declared' | 'forward' | 'backward'];
+        return typeof total === 'number' ? String(total) : undefined;
+      }
+      const rule = counts.byRule.get(key.slice(0, dot) as OwnershipRule);
+      const field = key.slice(dot + 1);
+      return rule && field in rule
+        ? String(rule[field as keyof typeof rule])
+        : undefined;
+    },
+
+    /*
+     * `{{schema-count:<key>}}` — how big the schema is, computed at render.
+     *
+     * Same reasoning as `ownership-count` above, and a worse offender: the
+     * LinkML step's five hand-typed numbers were ALL stale (56/225/50/80
+     * classes-attributes-enums-links against 54/336/53/117), inherited from a
+     * paragraph written before two schema syncs. Keys are the fields of
+     * `SchemaCounts`. An unknown key leaves the placeholder visible and fails
+     * the content test.
+     *
+     * ⚠️ For "how many entities are in the panel" use `panelEntities`, NOT
+     * `concreteClasses` — see the warning on `getSchemaCounts`. Quoting the
+     * wrong one put 52 in the prose beside the panel's own 57.
+     */
+    'schema-count': (key: string) => {
+      const counts = dataService.getSchemaCounts();
+      return key in counts
+        ? String(counts[key as keyof typeof counts])
+        : undefined;
+    },
+
+    /*
+     * `{{relation:own-fwd:Condition.affected_body_site:BodySite}}` — a whole
+     * relation on ONE line, the way the relation popover writes a row: the
+     * declaring end in code, the arrow, the other end in code, never wrapped.
+     * Siggie, 2026-09-11: the same thing written as three markdown pieces
+     * broke across lines at the popover's width.
+     */
+    'relation': (arg: string) => {
+      const r = parseRelationArg(arg);
+      return r ? `![${r.left} ${r.right}](widget:relation:${arg})` : undefined;
+    },
+
+    /*
+     * `{{loop}}` — the self-loop mark as the canvas draws it, inline in prose.
+     * Takes no argument: the canvas mark names the entity and attribute of the
+     * row it sits on, and in prose there is no row, so the widget carries the
+     * generic `LOOP_TITLE`.
+     */
+    'loop': () => `![${LOOP_TITLE}](widget:loop)`,
+  };
+}
+
+function parseRelationArg(arg: string) {
+  const [kind, left, right] = arg.split(':');
+  return kind && kind in EDGE_STYLE.kinds && left && right
+    ? { kind: kind as DrawnKind, left, right }
+    : undefined;
+}
+
+/**
+ * Inline widgets the tour's markdown can embed as `![alt](widget:<name>:<arg>)`.
+ * The resolvers above write those URLs; this is what draws them. Each widget's
+ * root element carries `data-widget="<name>"`, so a mark seen on screen can be
+ * traced back to the widget that drew it.
+ */
+export const helpWidgets = {
+  edge: (kind: string) =>
+    kind in EDGE_STYLE.kinds
+      ? <EdgeSample kind={kind as DrawnKind} width={40} className="help-inline-widget" />
+      : null,
+  relation: (arg: string) => {
+    const r = parseRelationArg(arg);
+    return r ? (
+      <span className="help-inline-relation">
+        <code>{r.left}</code>
+        <EdgeSample kind={r.kind} width={40} className="help-inline-widget" />
+        <code>{r.right}</code>
+      </span>
+    ) : null;
+  },
+  loop: () => <LoopIcon title={LOOP_TITLE} className="help-inline-widget" />,
+};
+
+/**
+ * Colour names the tour's markdown can use in `:s[…]{color=<name>}` and
+ * `{bg=<name>}` — handed to `<HelpProvider colors={...}>`, so prose about an
+ * edge or a range kind can wear the colour the canvas and legend draw it in,
+ * and follow the palette when it changes (Siggie, 2026-09-11).
+ *
+ * | Name | From |
+ * |---|---|
+ * | `own-fwd`, `own-bkwd`, `association` | `EDGE_STYLE.kinds` (= `EDGE_COLORS`) |
+ * | `entity`, `enum`, `data-type`, `variable`, `slot` | `RANGE_COLORS` |
+ * | `sibling-<n>`, `sibling-<n>-fill` | `SIBLING_COLORS[n]` ink and band, n from 0 |
+ */
+export const helpColors: Record<string, string> = {
+  ...Object.fromEntries(
+    Object.entries(EDGE_STYLE.kinds).map(([kind, k]) => [kind, k.color])),
+  entity: RANGE_COLORS.entity,
+  enum: RANGE_COLORS.enum,
+  'data-type': RANGE_COLORS.dataType,
+  variable: RANGE_COLORS.variable,
+  slot: RANGE_COLORS.slot,
+  ...Object.fromEntries(SIBLING_COLORS.flatMap((c, i) => [
+    [`sibling-${i}`, c.text],
+    [`sibling-${i}-fill`, c.fill],
+  ])),
+};

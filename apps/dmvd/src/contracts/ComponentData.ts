@@ -1,0 +1,251 @@
+/**
+ * Component Data Contracts
+ *
+ * Centralized type definitions for data interfaces used across UI components.
+ * These contracts define the shape of data that components expect to receive,
+ * maintaining clear separation between UI layer and model/service layers.
+ *
+ * Architecture:
+ * - Components define what data they need (these interfaces)
+ * - DataService provides data matching these contracts
+ * - Enables independent evolution of UI and model layers
+ *
+ * See CLAUDE.md for separation of concerns principles.
+ */
+
+import type {Element} from '../models/Element';
+
+// ============================================================================
+// Element Selection (DEPRECATED)
+// ============================================================================
+
+/**
+ * @deprecated Use Element directly from models/Element via DataService
+ * This alias exists for backward compatibility only.
+ */
+export type SelectedElement = Element;
+
+// ============================================================================
+// Section Component Contracts
+// ============================================================================
+
+/**
+ * HoverZone - Which part of an item was hovered
+ * Used to determine what type of transitory box to show
+ */
+export type HoverZone = 'name' | 'badge';
+
+/**
+ * ItemHoverData - Hover event data for item interactions
+ * Used by Section component to emit hover events with necessary context.
+ */
+export interface ItemHoverData {
+  id: string;       // DOM node ID for positioning (e.g., "lp::Specimen")
+  type: string;     // Item type: "class", "enum", "slot", "variable"
+  name: string;     // Item name: "Specimen", "SpecimenTypeEnum", etc.
+  hoverZone: HoverZone;  // Which zone triggered the hover
+}
+
+/**
+ * RelationshipBadgeData - Relationship counts for badge display
+ * Shows incoming/outgoing relationship counts
+ */
+export interface RelationshipBadgeData {
+  incoming: number;
+  outgoing: number;
+}
+
+/**
+ * SectionItemData - Data for rendering a single item in a section
+ * Component-defined interface; DataService provides this data.
+ */
+export interface SectionItemData {
+  // [sg] get this to work with ItemInfo interface; they are partly redundant now
+
+  // Identity (raw name from model layer, contextualized by UI layer)
+  id: string;                     // "Specimen" (raw name, UI adds context prefix)
+
+  // Display
+  displayName: string;            // "Specimen"
+  level: number;                  // Indentation depth
+
+  // Visual styling
+  badgeColor?: string;            // Tailwind: "bg-blue-100 text-blue-800"
+  badgeText?: string;             // "103" (type-specific: variables, permissible values, etc.)
+  badgeTooltip?: string;          // "103 variables" - explains what the badge count represents
+  relationshipBadge?: RelationshipBadgeData;  // Relationship counts for hover badge
+  indicators?: Array<{            // Visual indicators (e.g., "abstract")
+    text: string;                 // "abstract"
+    color: string;                // Tailwind: "text-purple-600"
+  }>;
+
+  // Interaction
+  hasChildren?: boolean;
+  isExpanded?: boolean;
+  isClickable: boolean;
+
+  // Event data (opaque to component, passed through to callbacks)
+  hoverData: Omit<ItemHoverData, 'hoverZone'>;  // Zone determined by which area is hovered
+}
+
+/**
+ * SectionData - Data for rendering an entire section (Classes, Enums, etc.)
+ * Component-defined contract; DataService provides section data.
+ */
+export interface SectionData {
+  id: string;                     // "class"
+  label: string;                  // "Classes (42)"
+  getItems: (expandedItems?: Set<string>, position?: 'left' | 'middle' | 'right') => SectionItemData[];
+  expansionKey?: string;          // For state persistence ("lp::class")
+  defaultExpansion?: Set<string>; // Default expanded items
+}
+
+// ============================================================================
+// ItemsPanel Component Contracts
+// ============================================================================
+
+/**
+ * ToggleButtonData - Metadata for section toggle buttons
+ * Provided by App.tsx from DataService/registry; component defines what it needs.
+ */
+export interface ToggleButtonData {
+  id: string;                     // "class", "enum", "slot", "variable"
+  icon: string;                   // Short badge abbreviation, vocab-driven (e.g. "Ent", "Attr", "PVS")
+  label: string;                  // "Classes"
+  activeColor: string;            // Tailwind: "bg-blue-500"
+  inactiveColor: string;          // Tailwind: "bg-gray-300 dark:bg-gray-600"
+}
+
+// ============================================================================
+// FloatingBoxManager Component Contracts
+// ============================================================================
+
+/**
+ * FloatingBoxMetadata - Display metadata for floating boxes
+ * Maintains view/model separation - uses display strings, not model instances.
+ */
+export interface FloatingBoxMetadata {
+  title: string;        // e.g., "Class: Specimen"
+  subtitle?: string;    // e.g., "Relationships  0 ↘  •  ↗ 3" (optional second line)
+  color: string;        // Tailwind classes for header (e.g., "bg-blue-700 border-blue-800")
+}
+
+/**
+ * BoxContentType - What kind of content the box displays
+ * Used to distinguish detail boxes from relationship boxes for the same item
+ * Also determines which group a persistent box belongs to
+ */
+export type BoxContentType = 'detail' | 'relationship';
+
+/**
+ * GroupId - Identifier for floating box groups
+ * Maps directly to BoxContentType for simplicity
+ */
+export type GroupId = 'details' | 'relationships';
+
+/**
+ * FloatingBoxData - Complete data structure for a floating box
+ * Supports both transitory (auto-dismiss) and persistent (grouped) modes.
+ *
+ * Transitory boxes: appear near hovered item, dismissed on mouse leave
+ * Persistent boxes: belong to a group container, can be collapsed/closed individually
+ */
+export interface FloatingBoxData {
+  id: string;
+  mode: 'transitory' | 'persistent';
+  contentType: BoxContentType;  // What kind of content (detail vs relationship)
+  metadata: FloatingBoxMetadata;
+  content: React.ReactNode;
+  itemId: string;  // Item identifier for callbacks and state management
+  // For transitory boxes - DOM ID of the reference element for Floating UI positioning
+  referenceElementId?: string;
+  // Legacy position (will be removed - use referenceElementId with Floating UI)
+  position?: { x: number; y: number };
+  size?: { width: number; height: number };
+  /** @deprecated Will be removed when groups are implemented - groups handle positioning */
+  isUserPositioned?: boolean;
+  // For persistent boxes in groups
+  isCollapsed?: boolean;  // Whether this box is collapsed within its group
+}
+
+/**
+ * FloatingBoxGroupData - Data structure for a group container
+ * Groups contain multiple collapsible item boxes (details or relationships)
+ */
+export interface FloatingBoxGroupData {
+  id: GroupId;
+  title: string;  // "Details" or "Relationships"
+  boxes: FloatingBoxData[];  // Ordered list of boxes in this group
+  position?: { x: number; y: number };  // User-dragged position (undefined = use default)
+  size?: { width: number; height: number };  // User-resized dimensions
+  isPoppedOut?: boolean;  // Whether this group is in a popout window
+}
+
+// ============================================================================
+// DetailPanel Component Contracts
+// ============================================================================
+
+/**
+ * LinkData - Represents a clickable external link in detail content
+ * Used for CURIEs that have full URL resolutions (e.g., "schema:identifier" → "http://schema.org/identifier")
+ */
+export interface LinkData {
+  text: string;  // Display text (e.g., "schema:identifier")
+  url: string;   // Full URL (e.g., "http://schema.org/identifier")
+}
+
+/**
+ * ElementRef - Represents a reference to another element in the schema
+ * Used for Range values, class names in "Used By Classes", etc.
+ * Clicking navigates to that element's details.
+ */
+export interface ElementRef {
+  name: string;  // Element name (e.g., "uriorcurie", "Specimen")
+  type: string;  // Element type (e.g., "type", "class", "enum", "slot")
+}
+
+/**
+ * Type guard to check if a value is LinkData
+ */
+export function isLinkData(value: unknown): value is LinkData {
+  return typeof value === 'object' && value !== null && 'text' in value && 'url' in value && !('type' in value);
+}
+
+/**
+ * Type guard to check if a value is ElementRef
+ */
+export function isElementRef(value: unknown): value is ElementRef {
+  return typeof value === 'object' && value !== null && 'name' in value && 'type' in value && !('url' in value);
+}
+
+/**
+ * DetailSection - Section data for detail panel display
+ * Used by DetailContent component to render information sections.
+ */
+export interface DetailSection {
+  sectionId: string;  // Stable identity (SectionId value); use for lookups, NEVER `name`
+  name: string;       // Display title, from ACTIVE_VOCAB.section[] — may include a count suffix
+  text?: string;
+  tableHeadings?: string[];
+  tableContent?: unknown[][];  // Can contain strings, numbers, or LinkData objects
+  tableHeadingColor?: string; // Tailwind classes for heading background
+}
+
+/**
+ * DetailData - Complete data for detail panel rendering
+ * Provided by DataService; component defines what it needs for display.
+ */
+export interface DetailData {
+  titlebarTitle: string;    // "Class: Specimen"
+  title: string;            // "Specimen"
+  subtitle?: string;        // "extends Entity"
+  titleColor: string;       // From ELEMENT_TYPES[type].color
+  description?: string;
+  sections: DetailSection[];
+}
+
+// ============================================================================
+// Graph/Relationship Component Contracts
+// ============================================================================
+// [sg] these are used by model as well as components; should probably be moved to SchemaTypes.ts
+

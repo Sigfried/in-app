@@ -1,0 +1,474 @@
+# Documentation Reorganization Decisions
+**Date:** 2025-01-20
+**Session:** Interactive doc/planning cleanup after demo
+
+## Overall Strategy
+- Radically simplify existing docs rather than adding more process documentation
+- Delete/archive obsolete content aggressively
+- Flatten nested hierarchies into simple lists
+- Keep docs short enough to avoid TOCs if possible
+- Use `docs/archive/tasks.md` for archiving TASKS.md content
+
+## File Structure Decisions
+- **Keep symlink approach:** Root-level symlinks point to canonical files in `docs/`
+- **README.md:** Only actual file in root (for GitHub display)
+- All other docs live in `docs/` with symlinks from root
+
+---
+
+## TASKS.md Section-by-Section Decisions
+
+### Section 1 (Lines 3-64): "🚨 URGENT - Demo Fixes"
+**Decision:** Delete/archive when finished with doc reorg
+**Status:** Temporary context for this session
+
+### Section 2 (Lines 66-111): "✅ Completed Quick Fixes"
+**Decision:**
+- Extract unfixed bugs to active bug list
+- Archive fixed items to `docs/archive/tasks.md`
+- Delete pseudocode (lines 96-105) - already incorporated into LinkOverlay
+
+### Section 3 (Lines 113-134): "After Demo: Documentation & Structure Cleanup"
+**Decision:** Use as rough guide but don't treat as settled - verify each file as we go
+
+### Section 4 (Lines 137-161): "Table of Contents"
+**Decision:**
+- Currently broken, don't fix yet
+- May become unnecessary if we simplify enough
+- Revisit after reorganization complete
+
+### Section 5 (Lines 163-182): "DetailContent.test.tsx Failures"
+**Decision:**
+- Keep as simple task
+- Provide link to archived details if helpful
+- Don't keep full detail in active tasks
+
+### Section 6 (Lines 184-191): "Architecture & Refactoring Decisions"
+**Decision:** Delete placeholder - content already archived
+
+### Section 7 (Lines 193-243): "Different Variable Treatment for Condition and Drug Exposure"
+**Decision:**
+- Archive conversation (waiting for Anne's response)
+- Keep link to archived version
+- Keep resolution (line 236-242) as upcoming TODO - should be easy after model interface stable
+- Note: Variables kept in hover/detail boxes, removed from panel interface
+
+### Section 8 (Lines 245-268): "UI Component Refactoring 🎨 ACTIVE"
+**Decision:**
+- Work has progressed, some still relevant
+- Prioritization probably doesn't match reality post-demo
+- Combine/review with active bug list from Q2.2
+
+### Section 9 (Lines 270-283): "Documentation Cleanup 📚 TODO"
+**Decision:**
+- This is what we're doing NOW
+- Keep "CLAUDE.md - Add graph model patterns, SlotEdge architecture" as low-priority doc task
+- Delete rest once done
+
+### Section 10 (Lines 287-341): "Unified Detail Box System - Remaining Work"
+**Decision:**
+- Still relevant: #3, #4, #6, #7
+- Uncertain: #5, #10
+- Keep just the remaining tasks (lots of positioning issues exist)
+- Remove historical detail
+
+### Section 11 (Lines 345-387): "Future UI Improvements"
+**Decision:**
+- **LinkOverlay Refactor:** Currently active work (not sure where described)
+- **Detail Panel Enhancements:** Coming up soon
+  - Still not showing reachable_from for enums
+  - Not showing inheritance
+- **Abstract Tree Rendering:** Low priority, but related to grouping section items (fairly soon)
+- Note: "See full task description in Future Work section" references don't exist - may be described elsewhere
+
+### Section 12 (Lines 390-447): "Upcoming Features"
+**Decision:**
+- All three still upcoming: App Configuration File, Fix Dark Mode, User Help Documentation
+- Use "upcoming work details file" with brief descriptions + links in TASKS.md
+- **NEW ITEM:** URLs displayed as links - want soon, already set up for it (HIGH PRIORITY)
+
+### Section 13 (Lines 449-815): "Future Work" - Detailed Breakdown
+**Overall:** Way too long (366 lines). Archive most, extract priorities.
+
+#### Items to Keep/Promote:
+
+**High Priority:**
+- **selfRefs (loop links):** May have done some on branch, high priority
+- **External Link Integration:** High priority (same as URLs item above)
+
+**Upcoming:**
+- **Relationship Info Box - Bi-directional preview:** Hovering over element names in info box highlights them in tree panels
+- **Overhaul Badge Display System:** Medium priority (same as Enhanced Element Metadata Display)
+
+**Medium Priority:**
+- **Search and Filter:**
+  - Filtering: medium-low priority (grouping provides a lot already)
+  - Search: important, medium priority
+  - Filter toggles: needs discussion, put with other filtering tasks
+- **Merge TESTING.md Files:** Both out of date, merge and update at some point
+- **Terminology Consistency:**
+  - Change "attribute" to "slot" in most/all places
+  - Terminology configuration: not high priority, should go with app config file
+- **Performance - Animation library:** Funkiness in interactions including link movement with scrolling. If this helps, medium priority
+- **Performance - Viewport culling for links:** Better idea:
+  - Don't show links when both endpoints off screen
+  - When one endpoint visible, show beginning of link with interaction to bring other end into focus
+  - Very nice but not high priority
+
+**Low Priority Future:**
+- **Relationship Info Box - Keyboard navigation**
+- **Split Element.ts:** Hopefully won't be necessary after refactor (organizing code better already on list)
+- **Custom Preset Management**
+- **Neighborhood Zoom + Feature Parity with Official Docs (combined):**
+  - Made more sense for node-link displays
+  - Want ERDs and other stuff from linkml generated docs (like https://vladistan.github.io/linkml-qudt/datadict/#angleunit)
+
+**Distant Future:**
+- **Advanced Overview:** Cool future ideas
+- **Performance - Virtualization:** Until we have bigger schemas (funding from beyond BDCHM)
+- **Semantic Relationship Features:** Based on interesting but not usable early work. Some ideas worth considering. Add something about LLM support, maybe using MCP
+
+**Delete:**
+- **Relationship Info Box - "Explore relationship" action**
+- **Graph-based Model Architecture:** Doing it now but nothing in this section relevant
+- **GitHub Issue Management:** Ship has sailed, doing it without GitHub issue tracking
+
+**End of Docs Refactor:**
+- **Review DOC_CONVENTIONS.md:** Neither paid attention for long time. Look at end and see if anything worth keeping
+
+### Section 14 (Lines 742-815): "UI Test Checklist Template"
+**Decision:**
+- Should have been useful, but never looked at it again
+- Move to TESTING.md (doesn't belong in TASKS.md)
+
+---
+
+## TASKS.md Review Complete!
+
+---
+
+---
+
+## Other Documentation Files Review
+
+### Group A: Root-level unique files
+
+#### ELEMENT_MERGE_ANALYSIS.md (Q15)
+**Decision:** Pretty recent, will help with merging/reorganizing - KEEP
+
+#### ELEMENTPREREFACTOR_RETIREMENT_PLAN.md (Q16)
+**Decision:**
+- Phases 2 and Phase 3.2 still relevant
+- Put those somewhere sensible (nonredundant)
+- Delete the rest
+
+#### TWO_GRAPH_ANALYSIS.md (Q17)
+**Decision:**
+- Use "upcoming work details file" with brief descriptions + links in TASKS.md
+- Not sure yet where it will end up in code refactoring order
+
+#### LINKOVERLAY_REFACTOR_PLAN.md (Q18)
+**Detailed section-by-section:**
+
+**Design (from REFACTOR_PLAN Stage 5):**
+- Redundant with description of grouping slots elsewhere
+- More detail here though - merge them
+
+**Add Class→Slot and Slot→Range Edges to Graph:**
+- Think this is done
+- Probably all code samples have been used
+- Maybe worth checking if there's anything useful, but doubtful
+
+**Your Proposal:**
+- Not finished
+- Think everything here has been put in other places
+
+**Architecture LayoutManager Responsibilities:**
+- Not sure if anything useful but check
+- Lots of remaining work on LayoutManager
+
+**Implementation Steps:**
+- Phase 1: Think obsoleted by dom-based-link-overlay but check
+- Phase 2: Ditto
+- Phase 3: Ditto
+- Phase 4: Combine with this task elsewhere, might help there
+
+**Open Questions for You:**
+- Questions 1-3: Obsolete
+- Question 4: Open question but think is handled elsewhere
+
+---
+
+### Group B: Core docs/ files
+
+#### docs/CLAUDE.md (Q19)
+**Detailed section-by-section:**
+
+**🚨 CRITICAL: NEVER DESTROY UNCOMMITTED WORK:**
+- Make more succinct but MUST follow it
+
+**🚨 CRITICAL ARCHITECTURAL PRINCIPLE:**
+- I seldom pay attention but it would be nice
+
+**Code elegance/DRY:**
+- Add something about writing well-structured, DRY code?
+- Only if it might actually change my behavior
+- User wants: "code that can be appreciated by a good, clever programmer who loves elegance and concision"
+- User notes: "you were trained on a lot more bad code than good"
+- Make this more concise if keeping it
+- Maybe put in ~/.claude/CLAUDE.md if I ever read that
+
+**🔒 ARCHITECTURAL ENFORCEMENT:**
+- Enforcement is in place, check and maybe expand
+- Expand enforcement (in code), not this section
+- Just enough to encourage continued enforcement of principles
+
+**⚠️ Additional Principles:**
+- Decent stuff, combine concisely with above
+
+**Hierarchical Data:**
+- Obsolete
+
+**Structural Not Semantic Categorization:**
+- Don't need this anymore
+
+**Config-Based Abstraction Pattern:**
+- Combine with App Configuration File elsewhere
+
+**Element Identity: .name vs getId():**
+- Baked into code now (at least in branch)
+- Save whatever will help but keep concise
+
+**🔧 TypeScript Build Configuration:**
+- Make this part of workflow protocol
+- User asks: "btw, i can find that long thing i wrote to launch this whole interactive thing. do you know where it is?"
+  - Answer: TASKS.md Section 1 (lines 3-64 originally) - already decided to delete/archive when done
+
+#### docs/REFACTOR_PLAN.md (Q20)
+**Decision:**
+- Obsolete
+- Could archive but probably don't need it
+
+#### docs/UI_REFACTOR.md (Q21)
+**Decision:**
+- Q21.1: Was the working doc until demo rush a couple days ago, then switched to urgent list at top of TASKS
+- Q21.2: No duplication/conflict! TASKS.md Section 8 just has brief summary pointing to UI_REFACTOR.md for details
+  - This is good pattern: short summary with link to detailed doc
+  - Fits with "upcoming work details file" approach
+
+#### docs/PROGRESS.md (Q22)
+**Decision:**
+- Don't drop it; archive it
+- Won't continue to maintain
+- If major milestones needed for reports, extract from archived stuff
+
+---
+
+### Group C: Supporting docs
+
+#### docs/DOC_CONVENTIONS.md (Q23)
+**Decision:** Skip for now, review at the very end of docs refactor
+
+#### docs/COMPONENT_FLOW.md (Q24)
+**Decision:** Obsolete
+
+#### docs/GRAPHOLOGY_DESIGN.md (Q25)
+**Decision:** Most if not all is decided, implemented, or obsolete
+
+#### docs/TESTING.md (Q26)
+**Decision:**
+- Low priority
+- If super easy and quick, can get it out of the way whenever
+- Task: Merge with TESTING.root-snapshot-2025-11-03.md
+
+#### docs/DATA_FLOW.md (Q27)
+**Decision:**
+- Haven't looked at in a long time
+- Some probably obsolete, lots overlaps with plans elsewhere
+- Needs careful review and merging anything important into other docs
+
+---
+
+### Group D: Other
+
+#### scripts/README.md (Q28)
+**Decision:** Don't need it (uv created it) - delete
+
+#### archive/PHASE_6.4_PLAN.md (Q29)
+**Decision:** Keep as-is (already archived)
+
+---
+
+## ✅ SYSTEMATIC REVIEW COMPLETE!
+
+All documentation files reviewed. Ready to implement decisions.
+
+---
+
+---
+
+## 🎉 SESSION COMPLETE - Ready for Context Clear
+
+### What We Accomplished
+1. ✅ **Systematic review** - All 25+ doc files reviewed (TASKS.md, Groups A-D)
+2. ✅ **Quick wins** - Deleted 3 obsolete files, archived 2 completed docs (728 lines removed)
+3. ✅ **TASKS.md restructured** - Down from 815 to 150 lines (81% reduction)
+4. ✅ **Branch merged** - dom-based-link-overlay merged into main
+5. ✅ **All work committed** - 13 commits ahead of origin/main
+
+### What's Left to Do
+**Next session: Option 3 - Consolidate CLAUDE.md (20-30 min)**
+
+Based on review decisions (see "docs/CLAUDE.md (Q19)" section above), CLAUDE.md needs:
+- Make "NEVER DESTROY UNCOMMITTED WORK" more succinct
+- Keep "CRITICAL ARCHITECTURAL PRINCIPLE"
+- Add code elegance/DRY guidance (if it might help)
+- Check and expand architectural enforcement
+- Combine "Additional Principles" concisely
+- Delete: Hierarchical Data, Structural Not Semantic Categorization
+- Merge Config-Based Abstraction Pattern with App Configuration File
+- Simplify Element Identity section (baked into code now)
+- Move TypeScript Build Configuration to workflow protocol
+
+### Resume Instructions
+**When ready to continue:**
+```
+Continue with Option 3: Consolidate CLAUDE.md based on the decisions
+in doc_reorg_decisions_temp.md (see "docs/CLAUDE.md (Q19)" section).
+Goal: Make it more succinct while keeping critical principles.
+```
+
+---
+
+## 🎉 UPDATE - CLAUDE.md Consolidation Complete!
+
+**Date:** 2025-01-24
+**Commit:** 62cee49
+
+### What Was Done
+✅ **CLAUDE.md consolidated** - Down from 297 to 169 lines (43% reduction)
+
+**Removed/Simplified:**
+- Made "NEVER DESTROY UNCOMMITTED WORK" more succinct (removed redundant bullets)
+- Deleted "Hierarchical Data" section (obsolete)
+- Deleted "Structural Not Semantic Categorization" (obsolete)
+- Deleted "Config-Based Abstraction Pattern" (58 lines for unimplemented pattern)
+- Simplified "Element Identity" to essentials (details baked into code)
+- Reorganized TypeScript config under new "WORKFLOW" section
+- Updated "CURRENT TASK" to match new TASKS.md structure
+
+**Kept Important Principles:**
+- Critical architectural principle (separation of model/view concerns)
+- Architectural enforcement (ESLint rules)
+- DTOs vs Domain Models vs DataService
+- Element Identity guidance
+
+**Bonus:** Fixed unused useMemo import in LinkOverlay.tsx
+
+### What's Next
+**Next task: Review and consolidate DATA_FLOW.md**
+
+From decisions at line 284-289:
+- Haven't looked at in a long time
+- Some probably obsolete, lots overlaps with plans elsewhere
+- Needs careful review and merging anything important into other docs
+
+---
+
+## 🎉 UPDATE - DATA_FLOW.md Archived!
+
+**Date:** 2025-01-24
+**Commits:** (pending)
+
+### What Was Done
+✅ **DATA_FLOW.md archived** - 1,264 lines of pre-refactor architecture documentation moved to archive/
+
+**Assessment:**
+- File explicitly marked as "pre-Slots-as-Edges architecture"
+- Last updated Nov 17, 2025 (2 months ago)
+- Most content describes old architecture that has been refactored
+- Planning sections reference REFACTOR_PLAN.md (now archived)
+- LinkOverlay refactor partially done (dom-based-link-overlay merged)
+
+**Extracted to UI_REFACTOR.md:**
+- Relationship Type Analysis table (10 relationship types documented)
+- Semantic Relationship Patterns (tree/cross-reference/compound)
+- Implementation approaches for compound relationships
+
+**Archived:**
+- Detailed pre-refactor data flow (1200+ lines)
+- Old collection creation details
+- Slot system complexity analysis
+- Redundancy analysis (resolved)
+- Planning docs already extracted elsewhere
+
+### What's Next
+**Documentation cleanup is nearly complete!**
+
+Remaining medium-priority tasks:
+- Add graph model patterns, SlotEdge architecture docs (from archived REFACTOR_PLAN)
+
+Low-priority tasks:
+- Merge TESTING.md with TESTING.root-snapshot file (if super easy)
+- Review DOC_CONVENTIONS.md at end of refactor
+
+---
+
+## 🎉 UPDATE - REFACTOR_PLAN Content Extraction Complete!
+
+**Date:** 2025-01-24
+**Commit:** 15c2cf4
+
+### What Was Done
+✅ **REFACTOR_PLAN content extracted** to active documentation
+
+**Task 1: Added Proposed Architecture to README.md**
+- Added "Graph-Based Architecture (Slots-as-Edges)" section
+- Documents graph structure (nodes, edges, three-panel layout)
+- Explains slot dual-role as nodes and edges
+- Located after "Key Architecture Patterns" section
+
+**Task 2: Added Detail Box Requirements to UI_REFACTOR.md**
+- Extracted from REFACTOR_PLAN Stage 4
+- Slot display requirements (clickable/hoverable ranges, metadata)
+- Located in middle of file (lines 422-431)
+
+**Task 3: Expanded LinkML Features in TASKS.md**
+- Added 8 specific features from LinkML documentation to consider
+- Terminology (direct vs induced slots), inheritance visualization, cardinality notation
+- Located in "Neighborhood Zoom + Feature Parity with Official Docs" section
+
+**Result:** REFACTOR_PLAN.md can now be archived
+
+---
+
+## 🎉 UPDATE - Graph Refactor Task Clarified and Prioritized!
+
+**Date:** 2025-01-24
+**Commits:** fcef68f, a81d511
+
+### What Was Done
+✅ **"Complete Graph Refactor" task clarified** with 3 specific steps
+✅ **Task moved to High Priority** (completes core Slots-as-Edges refactor)
+
+**Clarification:**
+- Found vague "Element.ts organization" task in Low Priority
+- Expanded into detailed 3-step plan:
+  - Step 1: Merge Element.ts and ElementPreRefactor.ts into single file
+  - Step 2: Migrate LinkOverlay to use `getRelationshipsNew()` (graph-based)
+  - Step 3: Remove old subclass-specific `getRelationships()` methods
+- Linked to full migration plan in Element.ts:1-68
+
+**Priority Correction:**
+- User feedback: "this is a primary part of the graph refactor, not low priority"
+- Moved from Low Priority to High Priority section in TASKS.md
+- Correctly positioned as completing the Slots-as-Edges architecture
+
+### What's Next
+**Documentation cleanup phase COMPLETE!**
+
+Next work from TASKS.md High Priority:
+1. LinkOverlay fixes (current bugs - class→slot direction, hover highlights, missing links)
+2. Complete Graph Refactor (Steps 6-7 - just clarified above)
+3. URLs as clickable links
+4. selfRefs (loop links)

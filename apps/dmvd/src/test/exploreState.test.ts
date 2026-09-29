@@ -1,0 +1,318 @@
+import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
+import {
+  readExploreState, writeExploreState, buildShareURL, DEFAULTS, rememberPreference,
+  INSTRUCTION_PARAMS, ONE_SHOT_PARAMS, readTourRequest, resetTourRequest,
+  type ExploreState,
+} from '../explore/exploreState';
+import { ENTITY_CATEGORIES } from '../config/entityCategories';
+import { categoryView } from '../config/categoryView';
+
+/**
+ * Shareable state. The bug this prevents: a link reproduced the SELECTION but
+ * rendered it with the recipient's localStorage settings, so a link showing
+ * off the sibling merge looked, to a first-time visitor, like the feature did
+ * not exist.
+ *
+ * The precedence rule under test is URL > localStorage > default.
+ */
+describe('explore state', () => {
+  beforeEach(() => localStorage.clear());
+
+  const read = (search: string) => readExploreState(search);
+
+  test('a bare URL gives the defaults', () => {
+    expect(read('')).toEqual(DEFAULTS);
+  });
+
+  test('URL beats a conflicting stored preference', () => {
+    // The whole point: the link wins, or shared links are unreliable.
+    rememberPreference('sibs', false);
+    rememberPreference('dir', 'DOWN');
+    expect(read('?sibs=1&dir=RIGHT').sibs).toBe(true);
+    expect(read('?sibs=1&dir=RIGHT').dir).toBe('RIGHT');
+  });
+
+  test('stored preference is used when the URL is silent', () => {
+    // A bare visit still remembers a returning user's settings.
+    rememberPreference('merge', 'far');
+    expect(read('').merge).toBe('far');
+  });
+
+  test('?sibs=0 is distinguishable from an absent sibs param', () => {
+    // The three-state trap: sibs defaults to TRUE, so a naive
+    // `get('sibs') === '1'` would read an absent param as "off" and silently
+    // disable the sibling merge on every bare visit.
+    expect(read('?sibs=0').sibs).toBe(false);
+    expect(read('').sibs).toBe(true);
+    expect(read('?sibs=1').sibs).toBe(true);
+  });
+
+  test('an invalid value falls through instead of poisoning the state', () => {
+    // A hand-edited link must not put the renderer into a state it cannot
+    // handle, so values are validated against their allowed sets, not cast.
+    expect(read('?merge=nonsense').merge).toBe(DEFAULTS.merge);
+    expect(read('?dir=sideways').dir).toBe(DEFAULTS.dir);
+  });
+
+  test('a corrupt stored preference also falls through', () => {
+    localStorage.setItem('explore-nl-merge', 'garbage');
+    expect(read('').merge).toBe(DEFAULTS.merge);
+  });
+
+  test('id lists round-trip through a share URL', () => {
+    const state: ExploreState = {
+      ...DEFAULTS,
+      sel: ['Participant', 'BodySite'],
+      detail: 'BodySite',
+    };
+    const url = buildShareURL(state, 'https://example.org/explore');
+    const back = read(new URL(url).search);
+    expect(back.sel.sort()).toEqual(['BodySite', 'Participant']);
+    expect(back.detail).toBe('BodySite');
+  });
+
+  test('every non-default setting survives a full round-trip', () => {
+    const state: ExploreState = {
+      sel: ['Specimen'], detail: null,
+      roots: true, sibs: false, dir: 'DOWN', merge: 'bend',
+      legend: true, cases: true,
+    };
+    const back = read(new URL(buildShareURL(state, 'https://x.test/')).search);
+    expect(back).toEqual(state);
+  });
+
+  test('defaults are omitted from the URL, so links stay short', () => {
+    const url = buildShareURL({ ...DEFAULTS, sel: ['Person'] }, 'https://x.test/');
+    const q = new URL(url).searchParams;
+    expect(q.get('sel')).toBe('Person');
+    for (const k of ['sibs', 'dir', 'merge', 'roots', 'detail', 'legend', 'cases']) {
+      expect(q.has(k), `${k} should be omitted at its default`).toBe(false);
+    }
+  });
+
+  test('`panels=0` closes every overlay, and never survives into a link', () => {
+    /*
+     * The sweep is an INSTRUCTION, like `tour`: it is resolved into the
+     * individual keys on read. Left in the URL it would re-close the panels on
+     * every reload and be copied into whatever the visitor shared next.
+     */
+    const back = read('?sel=Person&panels=0');
+    expect(back.legend).toBe(false);
+    expect(back.cases).toBe(false);
+    expect(back.detail).toBeNull();
+    // The selection is untouched: the sweep is about overlays, not the canvas.
+    expect(back.sel).toEqual(['Person']);
+    expect(new URL(buildShareURL(back, 'https://x.test/')).searchParams.has('panels')).toBe(false);
+  });
+
+  test('an explicit key beats the sweep, whatever the order', () => {
+    // "Clear the screen, then open the legend" — how a step names a clean
+    // picture with one thing left up.
+    for (const q of ['?panels=0&legend=1', '?legend=1&panels=0']) {
+      const back = read(q);
+      expect(back.legend, q).toBe(true);
+      expect(back.cases, q).toBe(false);
+    }
+  });
+
+  test('a share URL drops params Explore does not own', () => {
+    // Otherwise an unrelated param (a tracking tag, another app's state)
+    // rides along into every shared link.
+    const url = buildShareURL({ ...DEFAULTS, sel: ['Person'] },
+      'https://x.test/?utm_source=slack&stale=1');
+    const q = new URL(url).searchParams;
+    expect(q.has('utm_source')).toBe(false);
+    expect(q.has('stale')).toBe(false);
+    expect(q.get('sel')).toBe('Person');
+  });
+
+  test('following a link does not overwrite the visitor stored preference', () => {
+    // rememberPreference is only called by a deliberate toolbar click, so
+    // reading a link's settings must leave localStorage untouched.
+    rememberPreference('dir', 'DOWN');
+    read('?dir=RIGHT');
+    expect(localStorage.getItem('explore-nl-dir')).toBe('DOWN');
+  });
+
+  /**
+   * Which writes become back-button stops (see `showCategoryView` /
+   * `pushNextWrite` in ExploreApp.tsx; reasoning in WORKLOG.md 2026-09-04).
+   *
+   * The default has to stay `replaceState`: if an ordinary write pushed, back
+   * would replay the session one checkbox at a time and never leave the page.
+   */
+  describe('history entries', () => {
+    let pushed: number;
+    let replaced: number;
+
+    beforeEach(() => {
+      pushed = 0;
+      replaced = 0;
+      vi.spyOn(window.history, 'pushState').mockImplementation(() => { pushed++; });
+      vi.spyOn(window.history, 'replaceState').mockImplementation(() => { replaced++; });
+    });
+
+    afterEach(() => vi.restoreAllMocks());
+
+    test('an ordinary write replaces, and never pushes', () => {
+      writeExploreState({ ...DEFAULTS, sel: ['Person'] });
+      expect(pushed).toBe(0);
+      expect(replaced).toBe(1);
+    });
+
+    test('push: true pushes instead of replacing', () => {
+      writeExploreState({ ...DEFAULTS, sel: ['Person'] }, { push: true });
+      expect(pushed).toBe(1);
+      expect(replaced).toBe(0);
+    });
+
+    test('push: false is the same as saying nothing', () => {
+      writeExploreState({ ...DEFAULTS, sel: ['Person'] }, { push: false });
+      expect(pushed).toBe(0);
+      expect(replaced).toBe(1);
+    });
+
+    test('a pushed write carries the same params a replaced one would', () => {
+      // The flag chooses the history verb and nothing else — a pushed entry
+      // that dropped or added a param would make back restore a state the app
+      // never showed.
+      const state: ExploreState = {
+        ...DEFAULTS, sel: ['Visit', 'Person'], roots: true, dir: 'DOWN',
+      };
+      const urlFor = (opts?: { push: boolean }) => {
+        let seen = '';
+        const capture = (_s: unknown, _t: unknown, u?: string | URL) => { seen = String(u); };
+        vi.spyOn(window.history, 'pushState').mockImplementation(capture);
+        vi.spyOn(window.history, 'replaceState').mockImplementation(capture);
+        writeExploreState(state, opts);
+        return seen;
+      };
+      expect(urlFor({ push: true })).toBe(urlFor());
+    });
+  });
+});
+
+/**
+ * `cat=<id>` — the ⊞ control, as a tour instruction.
+ *
+ * Siggie, 2026-09-08: "it would be nice to have a shortcut for selecting all
+ * the entities in a category, same as you'd get clicking ⊞". "Same as" is the
+ * requirement, so the test that matters is the one comparing the two.
+ */
+describe('the cat shorthand', () => {
+  test('draws exactly what the ⊞ button draws', () => {
+    /*
+     * Both sides go through `categoryView`, so this is really pinning that
+     * nobody reimplements one of them later. The failure it guards is a
+     * `cat=` that expands to `classIds` alone: it would look right until a
+     * category grew a pin, then quietly differ from the button.
+     */
+    for (const cat of ENTITY_CATEGORIES) {
+      expect(readExploreState(`?cat=${cat.id}`).sel, `category ${cat.id}`)
+        .toEqual(categoryView(cat));
+    }
+  });
+
+  test('includes pins, not just members', () => {
+    // The half of "same as ⊞" that a naive implementation gets wrong. Skips if
+    // no category has pins, so it fails loudly rather than passing vacuously.
+    const pinned = ENTITY_CATEGORIES.find(c => c.pins.length > 0);
+    expect(pinned, 'no category has pins; this test has stopped proving anything')
+      .toBeDefined();
+    const sel = readExploreState(`?cat=${pinned!.id}`).sel;
+    for (const pin of pinned!.pins) expect(sel).toContain(pin);
+  });
+
+  test('accepts several categories, by comma or by the sel separator', () => {
+    const both = [...new Set([
+      ...categoryView(ENTITY_CATEGORIES[0]), ...categoryView(ENTITY_CATEGORIES[1]),
+    ])];
+    const a = ENTITY_CATEGORIES[0].id;
+    const b = ENTITY_CATEGORIES[1].id;
+    expect(readExploreState(`?cat=${a},${b}`).sel).toEqual(both);
+    expect(readExploreState(`?cat=${a}~${b}`).sel).toEqual(both);
+  });
+
+  test('expands an unknown category to nothing rather than throwing', () => {
+    // A stale link draws an empty canvas; it does not break the app.
+    expect(readExploreState('?cat=nosuchcategory').sel).toEqual([]);
+  });
+
+  test('yields to an explicit sel', () => {
+    // Same precedence as `panels=0&legend=1`: name the sweep, then the
+    // exception.
+    expect(readExploreState('?cat=admin&sel=Visit').sel).toEqual(['Visit']);
+  });
+
+  test('is an instruction param, so it never survives into a shared link', () => {
+    /*
+     * The reason it is stripped: it has already been resolved into `sel`, so
+     * what a viewer copies names the classes. Left in the URL it would
+     * re-expand on every reload, over whatever selection they had since made.
+     */
+    expect(INSTRUCTION_PARAMS).toContain('cat');
+  });
+});
+
+/**
+ * `?tour=` / `?step=` — the deep link into a tour (Siggie, 2026-09-17).
+ *
+ * The thing under test is the PARSE, not the navigation: what the URL means,
+ * and that the old spelling keeps meaning what it meant. Whether the tour then
+ * opens is `tourStack.integration.test.tsx`'s job.
+ *
+ * Every test resets the latch. `readTourRequest` answers once per page load
+ * and caches it (the param is stripped before some readers ask), so without a
+ * reset the second test in the file would read the first one's URL.
+ */
+describe('tour deep links', () => {
+  beforeEach(() => resetTourRequest());
+  afterEach(() => resetTourRequest());
+
+  test('no `tour=` is not a tour request', () => {
+    expect(readTourRequest('?sel=Person')).toBeNull();
+  });
+
+  test('a valueless `?tour` means "the first tour"', () => {
+    /*
+     * `tour: undefined` is exactly what `startTour` treats as "the default
+     * one". Both spellings of valueless reach it: `?tour` and `?tour=`.
+     */
+    for (const q of ['?tour', '?tour=']) {
+      expect(readTourRequest(q), q).toEqual({});
+      resetTourRequest();
+    }
+  });
+
+  test('`tour=<slug>` names the tour', () => {
+    expect(readTourRequest('?tour=ownership')).toEqual({ tour: 'ownership' });
+  });
+
+  test('`step=` rides along as a 1-based step number', () => {
+    expect(readTourRequest('?tour=ownership&step=3')).toEqual({ tour: 'ownership', step: 3 });
+  });
+
+  test('a step that is not a positive integer is dropped, and the tour still opens', () => {
+    // A typo in a hand-written link costs the reader the step, not the tour.
+    for (const bad of ['0', '-2', 'two', '2.5', '']) {
+      expect(readTourRequest(`?tour=ownership&step=${bad}`), bad)
+        .toEqual({ tour: 'ownership' });
+      resetTourRequest();
+    }
+  });
+
+  test('the answer is latched, because the params do not outlive the first write', () => {
+    /*
+     * `writeExploreState` strips `tour`/`step` in a mount effect (they are
+     * ONE_SHOT_PARAMS), and the component that acts on them is a sibling that
+     * has not necessarily asked yet. So the answer has to be a fact about the
+     * page load, not a question about the address bar right now.
+     */
+    expect(readTourRequest('?tour=ownership&step=3')).toEqual({ tour: 'ownership', step: 3 });
+    expect(readTourRequest('?sel=Person')).toEqual({ tour: 'ownership', step: 3 });
+  });
+
+  test('both params are one-shot, so neither survives into a shared link', () => {
+    for (const k of ['tour', 'step']) expect(ONE_SHOT_PARAMS).toContain(k);
+  });
+});

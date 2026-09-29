@@ -1,0 +1,1061 @@
+/* Help mode + tour chrome. Plain CSS (not Tailwind) so the whole src/help
+   directory can move into a standalone package without a build dependency. */
+
+/* ── CSS anchor positioning ────────────────────────────────────────────────
+   Where everything in this file is placed. Nothing in HelpLayer.tsx reads a
+   screen position any more: it tags an element, and these rules do the rest.
+
+   Baseline "newly available", January 2026, and used unguarded — no `@supports`
+   and no measured fallback (Siggie, 2026-09-08: "i'm fine only supporting
+   current browsers"). That decision is what made the migration a simplification
+   instead of a second implementation living beside the first. Do NOT add a
+   fallback branch back "just in case": if support turns out to be a real
+   problem, that is a new decision with new evidence.
+
+   `--help-anchor` is ONE name that MOVES. HelpLayer puts `data-help-anchor` on
+   whichever element the current step resolves to, so the popover and the ring
+   can name a single anchor while the step's anchor is dynamic. It is deliberate
+   that no rule here keys on `[data-help-id]` itself: the element is looked up by
+   its own tag and then MARKED, so one rule covers every kind at once and this
+   file names none of the host's. */
+[data-help-anchor] {
+  anchor-name: --help-anchor;
+}
+
+/* A step's `Spotlight:` elements — what the rings surround when that is not the
+   anchor. A step may name several, all on screen at once, so each needs its own
+   name: HelpLayer writes the name it picked into the attribute and one rule per
+   index reads it back. Same shape as the hint dots below, and for the same
+   reason — `anchor-name` needs a literal `<dashed-ident>` and cannot be fed
+   from an attribute. `SPOTLIGHT_MAX` in HelpLayer.tsx is this run's length.
+
+   The name goes through a custom property so an element that is BOTH the
+   anchor and a spotlight carries both names. A plain `anchor-name` here would
+   replace `--help-anchor`, and the popover, anchored to nothing, would sit at
+   the canvas's top left. */
+[data-help-spotlight="--help-spotlight-0"] { --help-spotlight-name: --help-spotlight-0; }
+[data-help-spotlight="--help-spotlight-1"] { --help-spotlight-name: --help-spotlight-1; }
+[data-help-spotlight="--help-spotlight-2"] { --help-spotlight-name: --help-spotlight-2; }
+[data-help-spotlight="--help-spotlight-3"] { --help-spotlight-name: --help-spotlight-3; }
+[data-help-spotlight="--help-spotlight-4"] { --help-spotlight-name: --help-spotlight-4; }
+[data-help-spotlight="--help-spotlight-5"] { --help-spotlight-name: --help-spotlight-5; }
+[data-help-spotlight="--help-spotlight-6"] { --help-spotlight-name: --help-spotlight-6; }
+[data-help-spotlight="--help-spotlight-7"] { --help-spotlight-name: --help-spotlight-7; }
+[data-help-spotlight] { anchor-name: var(--help-spotlight-name); }
+[data-help-anchor][data-help-spotlight] { anchor-name: --help-anchor, var(--help-spotlight-name); }
+
+body.help-mode {
+  cursor: help;
+}
+
+/* Hint dots take the other shape: a name PER element, since they are all on
+   screen at once pointing at different things. HelpLayer writes the name it
+   picked into `data-help-hint`, and one rule per index reads it back — a fixed
+   run because `anchor-name` needs a literal `<dashed-ident>` and cannot be fed
+   from an attribute. `HINT_MAX` in HelpLayer.tsx is this run's length; the two
+   must agree, and it caps the dots rather than letting an unmatched one fall
+   back to some other element's anchor. */
+[data-help-hint="--help-hint-0"] { anchor-name: --help-hint-0; }
+[data-help-hint="--help-hint-1"] { anchor-name: --help-hint-1; }
+[data-help-hint="--help-hint-2"] { anchor-name: --help-hint-2; }
+[data-help-hint="--help-hint-3"] { anchor-name: --help-hint-3; }
+[data-help-hint="--help-hint-4"] { anchor-name: --help-hint-4; }
+[data-help-hint="--help-hint-5"] { anchor-name: --help-hint-5; }
+[data-help-hint="--help-hint-6"] { anchor-name: --help-hint-6; }
+[data-help-hint="--help-hint-7"] { anchor-name: --help-hint-7; }
+[data-help-hint="--help-hint-8"] { anchor-name: --help-hint-8; }
+[data-help-hint="--help-hint-9"] { anchor-name: --help-hint-9; }
+[data-help-hint="--help-hint-10"] { anchor-name: --help-hint-10; }
+[data-help-hint="--help-hint-11"] { anchor-name: --help-hint-11; }
+[data-help-hint="--help-hint-12"] { anchor-name: --help-hint-12; }
+[data-help-hint="--help-hint-13"] { anchor-name: --help-hint-13; }
+[data-help-hint="--help-hint-14"] { anchor-name: --help-hint-14; }
+[data-help-hint="--help-hint-15"] { anchor-name: --help-hint-15; }
+[data-help-hint="--help-hint-16"] { anchor-name: --help-hint-16; }
+[data-help-hint="--help-hint-17"] { anchor-name: --help-hint-17; }
+[data-help-hint="--help-hint-18"] { anchor-name: --help-hint-18; }
+[data-help-hint="--help-hint-19"] { anchor-name: --help-hint-19; }
+[data-help-hint="--help-hint-20"] { anchor-name: --help-hint-20; }
+[data-help-hint="--help-hint-21"] { anchor-name: --help-hint-21; }
+[data-help-hint="--help-hint-22"] { anchor-name: --help-hint-22; }
+[data-help-hint="--help-hint-23"] { anchor-name: --help-hint-23; }
+[data-help-hint="--help-hint-24"] { anchor-name: --help-hint-24; }
+[data-help-hint="--help-hint-25"] { anchor-name: --help-hint-25; }
+[data-help-hint="--help-hint-26"] { anchor-name: --help-hint-26; }
+[data-help-hint="--help-hint-27"] { anchor-name: --help-hint-27; }
+[data-help-hint="--help-hint-28"] { anchor-name: --help-hint-28; }
+[data-help-hint="--help-hint-29"] { anchor-name: --help-hint-29; }
+[data-help-hint="--help-hint-30"] { anchor-name: --help-hint-30; }
+[data-help-hint="--help-hint-31"] { anchor-name: --help-hint-31; }
+[data-help-hint="--help-hint-32"] { anchor-name: --help-hint-32; }
+[data-help-hint="--help-hint-33"] { anchor-name: --help-hint-33; }
+[data-help-hint="--help-hint-34"] { anchor-name: --help-hint-34; }
+[data-help-hint="--help-hint-35"] { anchor-name: --help-hint-35; }
+[data-help-hint="--help-hint-36"] { anchor-name: --help-hint-36; }
+[data-help-hint="--help-hint-37"] { anchor-name: --help-hint-37; }
+[data-help-hint="--help-hint-38"] { anchor-name: --help-hint-38; }
+[data-help-hint="--help-hint-39"] { anchor-name: --help-hint-39; }
+
+/* Hint dot: one per helpable element, so help mode SHOWS what is helpable
+   instead of relying on swapped native tooltips (see HelpProvider). */
+.help-hint {
+  position: fixed;
+  /* At its element's top-right corner, overlapping it by 6px. Said once as a
+     relationship, so a dot cannot go stale while its element moves.
+     `position-anchor` is the one thing the dot sets for itself, inline, since
+     that is what names WHICH element it belongs to. */
+  left: calc(anchor(right) - 6px);
+  top: calc(anchor(top) - 6px);
+  z-index: 2147483000;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: #0284c7;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+  cursor: help;
+  box-shadow: 0 0 0 2px #fff;
+  animation: help-hint-in 120ms ease-out;
+}
+.help-hint:hover {
+  background: #0369a1;
+  transform: scale(1.15);
+}
+
+@keyframes help-hint-in {
+  from { opacity: 0; transform: scale(0.5); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+/* Ring around the element the current step is about. `pointer-events: none`
+   so it never intercepts a click meant for the app underneath.
+
+   Four calcs, and the ring tracks its anchor natively — which matters more
+   here than for the popover: a box dragged or relaid out must not slide out
+   from under its own highlight. The `0 0 0 9999px` scrim below needs nothing
+   of its own: it is painted relative to this box, so it follows for free. */
+.help-spotlight {
+  position: fixed;
+  /* The default anchor for the four anchor() calls below. Without it they are
+     invalid, every inset falls back to auto, and the ring collapses to a 4px
+     box at the page origin whose 9999px shadow dims the whole viewport with no
+     hole in it — which is what shipped between 4cd814d and 2026-09-09 evening.
+     That commit scoped the POPOVER's `position-anchor` to `[data-anchored]`
+     and took this one with it. The scoping is not needed here: the spotlight
+     is only rendered when the anchor resolved (`anchored &&` in HelpLayer). */
+  position-anchor: --help-anchor;
+  left: calc(anchor(left) - 4px);
+  top: calc(anchor(top) - 4px);
+  width: calc(anchor-size(width) + 8px);
+  height: calc(anchor-size(height) + 8px);
+  z-index: 2147482999;
+  border: 2px solid #0284c7;
+  border-radius: 6px;
+  pointer-events: none;
+  /* `--help-scrim`: the package default, overridable to `transparent` by a
+     host that dims its own content instead. See the note below this rule. */
+  --help-scrim: rgb(15 23 42 / 12%);
+  box-shadow: 0 0 0 3px rgb(2 132 199 / 25%), 0 0 0 9999px var(--help-scrim);
+  transition: left 160ms ease, top 160ms ease, width 160ms ease, height 160ms ease;
+}
+
+/* `Spotlight:` resolved: each ring surrounds its own element instead of the
+   anchor. The popover stays on the anchor; only the emphasis moves.
+
+   Several rings WITHOUT `Highlight: ring` stack their scrims: the default
+   `.help-spotlight` dims the page with a `0 0 0 9999px` shadow, so N of them
+   give N layers of dimming and each ring's hole is darkened by the others.
+
+   That was treated as a bug until Siggie looked at it (2026-09-17, the
+   `rows-and-dots` "an entity" beat): *"the dimming with two spotlights is a
+   little weird, but i actually like it better than the legal behavior"*. So
+   it is a LOOK an author may choose, and `helpContent.test.ts` only warns.
+   One scrim with several holes -- `clip-path` on a single overlay -- is
+   BACKLOG `multi-hole-scrim`, and would make this a choice between two good
+   renderings instead. */
+.help-spotlight[data-on-spotlight="0"] { position-anchor: --help-spotlight-0; }
+.help-spotlight[data-on-spotlight="1"] { position-anchor: --help-spotlight-1; }
+.help-spotlight[data-on-spotlight="2"] { position-anchor: --help-spotlight-2; }
+.help-spotlight[data-on-spotlight="3"] { position-anchor: --help-spotlight-3; }
+.help-spotlight[data-on-spotlight="4"] { position-anchor: --help-spotlight-4; }
+.help-spotlight[data-on-spotlight="5"] { position-anchor: --help-spotlight-5; }
+.help-spotlight[data-on-spotlight="6"] { position-anchor: --help-spotlight-6; }
+.help-spotlight[data-on-spotlight="7"] { position-anchor: --help-spotlight-7; }
+
+/* `Highlight: ring` — the ring and its glow, WITHOUT the 9999px scrim that
+   dims the rest of the page. For a step whose anchor is one control among
+   several the reader is meant to compare, where dimming the others hides the
+   context the step is talking about (Siggie, 2026-08-28). */
+.help-spotlight-ring {
+  box-shadow: 0 0 0 3px rgb(2 132 199 / 25%);
+}
+
+/* THE SCRIM'S COLOUR IS A KNOB, so a host that dims its own elements can turn
+   it off and keep the ring.
+
+   The `0 0 0 9999px` scrim dims a rectangle of the viewport with a hole at the
+   anchor, which is the only thing a package that knows nothing about the host's
+   content can do. A host that knows what its content IS can do better — dim the
+   six node boxes rather than the screen — and then two dimmings would stack.
+
+   It also stopped being free. While the popover was in the top layer it
+   outranked every z-index and the scrim could never touch it; as an ordinary
+   sibling inside the canvas it sits under the ring's z-index and the scrim
+   greys out the text the reader is there to read (Siggie, 2026-09-19).
+
+   Opting out is one declaration in the host's sheet, next to where it says what
+   its own dimming looks like:
+
+     .help-spotlight { --help-scrim: transparent; }   <- in the host's CSS
+
+   `:root[data-help-scrim]` is the companion: HelpLayer sets that attribute
+   while a scrim is up, so the host can scope its OWN dimming to the same
+   moments without knowing anything about rings. */
+
+/* The popover itself.
+
+   `position: absolute`, NOT `fixed`, and not in the top layer. It mounts
+   inside whatever container holds the element it points at (see
+   `mountPoints.ts`), so it shares that container's coordinate system: inside
+   the canvas it scales with the zoom transform and scrolls with the canvas,
+   which is the whole of docs/BACKLOG.md §Placement. Absolute resolves against
+   the nearest positioned ancestor, which is the mount point.
+
+   A host that registers no mount point gets `position: fixed` back — the
+   `:not([data-help-mount] *)` rule below — since with nothing to be absolute
+   INSIDE, viewport coordinates are the only meaning left. */
+.help-popover {
+  /* THE PACKAGE'S DEFAULT SIZE, and the hook a host resizes it through.
+     Every size inside the popover is `em` off this, so overriding it in the
+     HOST's own stylesheet scales the whole thing — prose, title, action band,
+     alert, context, tour nav — with one value:
+
+       .help-popover { --help-font-size: 15px; }   <- in the host's CSS
+
+     13px stays the package default. Do not retune it here for one app: this
+     file ships to every host, and an app's preferred reading size is the
+     app's, not the package's. dmvd's lives in `explore/helpTheme.css`.
+
+     Why `em` at all: each child used to re-declare an absolute px size, so the
+     `font-size` on this rule moved the body prose and nothing else. The sizes
+     were RELATIVE in intent (12px = chrome, one step down; 11px = two steps
+     down) but written absolutely, so the relationship existed only in
+     someone's head.
+
+     Careful with `em` on a nested element: it multiplies its PARENT's size,
+     not this base. `.help-popover-alert kbd` and `.help-popover-shortcut kbd`
+     sit inside 0.92em parents, so they carry 0.92em to land back on the same
+     11px, not the 0.85em their old px value suggests. Same for
+     `.help-popover-alert-once`. Each is commented at its rule. */
+  --help-font-size: 13px;
+
+  position: absolute;
+
+  /* Over the content it is mounted among — it is a sibling of that content
+     now, not an overlay above it, so it needs to say so. High enough to clear
+     a host's own layering without reaching for the 2147483000 the top-layer
+     era used. `pointer-events: auto` in case the host's mount point is an
+     overlay that switched them off; the popover has buttons. */
+  z-index: 100;
+  pointer-events: auto;
+
+  /* Lets a child raise the width past the inline `width` the layer sets.
+     `min-width` resolves OVER `width`, so `min-content` here means "at least
+     as wide as the widest thing inside that refuses to wrap". Today that is
+     the beat title row (`.help-popover-title-inline`); everything else in the
+     popover wraps, contributes a small min-content, and so changes nothing.
+     Without this the beat title row's `width: max-content` would overflow the
+     fixed-width box instead of growing it. */
+  min-width: min-content;
+
+  /* The gap between the popover and its anchor, on whichever side it lands —
+     stated once, and still right after a fallback flips it to another side.
+
+     An authored `OffsetX:` arrives as an inline `margin-left` and OVERRIDES
+     this on that one side, which is the right reading of the field: it is a
+     nudge along the inline axis, and the gap it displaces is the gap it was
+     chosen to replace. */
+  margin: 12px;
+
+
+  /* Never taller than the viewport; the BODY scrolls inside it (see the
+     `[data-open]` rule below). Unconditional, so no placement can be missing
+     it — which is the failure mode this guards (Siggie, 2026-09-08: "popover
+     getting cut off again").
+
+     ⚠️ `--help-vh`, not `100vh`, and the difference is the zoom. Inside the
+     canvas the popover is in CONTENT coordinates, which the wrapper's
+     `scale()` multiplies on the way to the screen — so a bare `100vh` here
+     would let a popover at zoom 0.5 be twice the viewport tall on screen.
+     `--help-vh` is `100vh` divided by the zoom, i.e. the viewport's height
+     expressed in the coordinates this box is actually laid out in. The
+     `, 1` fallback is the body-level case, where the two are the same. */
+  max-height: calc(var(--help-vh, 100vh) - 16px);
+
+  padding: 12px 14px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+  color: #0f172a;
+  font-size: var(--help-font-size);
+  line-height: 1.45;
+  box-shadow: 0 8px 28px rgb(15 23 42 / 18%);
+  overflow: visible;
+  flex-direction: column;
+}
+
+/* The `display` MUST stay scoped to the open state — now `[data-open]`, set by
+   HelpLayer, where it was `:popover-open` while this was a top-layer popover.
+
+   The shell renders unconditionally and its contents are gated on `entry`, so
+   a `display: flex` on the bare class paints an empty bordered rectangle over
+   the canvas on every page load, before any entry exists (Siggie, 2026-08-29:
+   "what's that rectangle doing there?"). The UA stylesheet used to hide the
+   closed state for us; nothing does now, so the `display: none` below is
+   explicit and the scoping matters MORE than it did, not less.
+
+   Column so a popover taller than the viewport scrolls its BODY and keeps the
+   nav row (back / next / ✕) reachable, rather than pushing it off the bottom.
+   `maxHeight` is set inline by `popoverPosition`. */
+.help-popover {
+  display: none;
+}
+
+/* NO MOUNT POINT: the host registered none, or the step's anchor did not
+   resolve, so the popover is a child of the layer at body level. There is
+   nothing for `absolute` to resolve against but the page, and viewport
+   coordinates are what `popoverPosition`'s unanchored branch computes — so
+   `fixed` is still right there, and only there. */
+.help-popover:not([data-help-scope] *) {
+  position: fixed;
+}
+/* Last-resort fallback: an anchor with no room on any of the four sides.
+   SPANS the whole viewport across the anchor rather than picking a side, so the
+   popover still sits in the anchor's row/column and the anchor stays visible
+   beside it.
+
+   ⚠️ This used to be `position-area: none; inset: 8px auto auto 8px`, which
+   ABANDONED the anchor and pinned the popover to the viewport's top-left corner.
+   That is the one placement that can cover the very element the step is pointing
+   at, and it is what "misplacement at 3.2 / 8.2, persisting forwards and
+   backwards" was (Siggie, 2026-09-09). A tall box in an LR diagram leaves no room
+   on any side, every flip fails, and the popover landed on the corner — over the
+   header, over the panel, over its own anchor.
+
+   Siggie, on what this actually has to guarantee: *"all it really needs to do
+   (since we're not going to succeed at getting the popover to avoid everything)
+   is not go on top of what it's anchored on."* `position-area` gives exactly
+   that for free — as long as an area stays in effect. So the last resort keeps
+   one. Do not reintroduce a fallback that drops the anchor. */
+@position-try --help-shift {
+  position-area: inline-end span-all;
+}
+
+/* And if even that has no room: the other side, still spanning. Two spanning
+   fallbacks cover a narrow viewport where the anchor is hard against one edge,
+   without either of them giving up the anchor. */
+@position-try --help-shift-start {
+  position-area: inline-start span-all;
+}
+
+/* THE ANCHOR MACHINERY IS SCOPED TO AN ANCHORED STEP, and must stay scoped.
+   `HelpLayer` sets `data-anchored` when the step's anchor actually resolved.
+
+   ⚠️ These were once on the bare `.help-popover`, and that was the bug behind
+   "the popover ends up in the same wrong place from here on, forwards and
+   backwards" (Siggie, 2026-09-09). An UNANCHORED step is centred by an inline
+   `left`/`top`/`transform` from `popoverPosition` — but `position-anchor` still
+   named `--help-anchor`, which for that step resolves to NOTHING. With no anchor
+   the default `position-area` cannot resolve, so the browser walked the fallback
+   list to `--help-shift`, whose `inset: 8px auto auto 8px` then **beat the inline
+   style**: position-try declarations override inline, which is the whole point of
+   position-try and the one way an inline `top` can lose. So the popover pinned to
+   the top-left corner, and the tallest one (`why`) ran off the bottom and looked
+   invisible.
+
+   It stuck across steps because it is a property of the ELEMENT's placement
+   state, not of the step — hence "every popover after that", in both directions.
+
+   Do not move either declaration back onto the bare class "so the anchored case
+   is simpler". An unanchored popover must have no anchor machinery on it at all.
+
+   `position-visibility: no-overflow` is deliberately NOT set: a popover whose
+   anchor scrolls out of the viewport should stay readable, not vanish
+   mid-sentence. The tour scrolls the anchor into view when the step opens, and
+   the reader is free to scroll away from it afterwards. */
+.help-popover[data-anchored] {
+  position-anchor: --help-anchor;
+  /* Flip out of the preferred side rather than hang off the screen, against the
+     popover's REAL height. `flip-block` and `flip-inline` cover a popover placed
+     beside or below its anchor; `--help-shift` is the last resort when neither
+     flip has room. */
+  position-try-fallbacks: flip-block, flip-inline, flip-block flip-inline,
+                          --help-shift, --help-shift-start;
+}
+
+.help-popover[data-open] {
+  display: flex;
+}
+
+/* An inline widget (`![alt](widget:...)`) sits in the line of prose like a
+   word: an arrow sample mid-sentence, aligned to the text's middle. */
+.help-inline-widget {
+  display: inline-block;
+  vertical-align: middle;
+  margin: 0 0.15em;
+}
+
+/* `{{relation:kind:Left:Right}}`: a relation written like a popover row —
+   code, arrow, code — as ONE unit that never breaks across lines, a little
+   smaller than the prose so a long qualified name fits. */
+.help-inline-relation {
+  display: inline-block;
+  white-space: nowrap;
+  font-size: 0.85em;
+}
+
+/* Only the prose scrolls; the title and the nav row hold their place. */
+.help-popover-body {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.help-popover-title {
+  margin: 0 0 6px;
+  /* Larger than body text so the step title is not mistaken for `**bold**`
+     inside a description -- they were both 1em/700 and read as the same
+     thing (Siggie, 2026-09-08). The title is the reader's anchor across a
+     run of beats, so it should outrank anything the prose can produce. */
+  font-size: 1.15em;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+/* ON A BEAT the title joins the tour label on ONE line (Siggie, 2026-09-17).
+   Through a run of beats the step title does not change while the prose under
+   it does, so a stacked title repeats itself at the reader and spends a line
+   of height doing it. The step's opening position keeps the stacked form --
+   `HelpLayer` only adds this class when `beatCount > 0 && beatIndex >= 0`.
+
+   THE LINE MUST NOT WRAP, and it is allowed to widen the popover to avoid it.
+   The worst case today is "BDCHM Data Categories" + "Survey / Questionnaire",
+   which is wider than the ~292px inside a floor-width (320px) popover. (No
+   px figure is quoted for it on purpose: it moves with the font stack and the
+   host's `--help-font-size`, nothing here depends on knowing it, and jsdom
+   cannot measure it, so a number written down here could only ever be a
+   guess that later reads as fact.)
+
+   How it widens WITHOUT measuring anything: `width: max-content` here makes
+   the h4's own min-content contribution the full unwrapped line, and
+   `min-width: min-content` on the popover (in the `.help-popover` rule) lets
+   that contribution beat the inline `width` the layer sets -- `min-width`
+   resolves over `width` in CSS, which is the whole mechanism. No layout pass,
+   no second render, and a short title changes nothing because its max-content
+   is already under the floor. */
+.help-popover-title-inline {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5em;
+  width: max-content;
+  /* Never wider than the popover can be; past this the title wraps rather
+     than pushing the box off the screen. */
+  max-width: calc(100vw - 16px);
+  /* BODY SIZE, overriding `.help-popover-title`'s 1.15em, and the size both
+     halves of the line share (Siggie, 2026-09-17: *"still too big. too much of
+     a contrast between tour and step titles"*).
+
+     It has to be set HERE, on the h4, not on the title span: an `em` on the
+     child multiplies its parent, so `font-size: 1em` there resolved against
+     the 1.15em and changed nothing. Every size below is an em of this, so the
+     row scales with the popover like everything else. */
+  font-size: 1em;
+  font-weight: 600;
+  color: var(--help-muted, #6b7280);
+}
+
+/* Neither part wraps: the flex line is sized to hold both whole. */
+.help-popover-title-inline .help-popover-tour,
+.help-popover-title-inline .help-popover-title-text {
+  white-space: nowrap;
+}
+
+/* The tour label matches the step title beside it on SIZE, WEIGHT and COLOUR
+   -- all three now come from the row -- and keeps only its uppercase and
+   tracking, which are what still mark it as a label rather than a name
+   (Siggie, 2026-09-17: *"keep tour title uppercased"*). The stacked layout is
+   untouched: there the label is still the quieter half.
+
+   `margin-bottom` is the stacked layout's gap; on one line it would push the
+   baselines apart. */
+.help-popover-title-inline .help-popover-tour {
+  display: inline;
+  margin-bottom: 0;
+  font-size: inherit;
+  font-weight: inherit;
+  color: inherit;
+}
+
+/* A divider between the tour label and the step title, so the two read as two
+   things and not one long caption. It carries more of that job now that the
+   two halves share a size and weight, so it is bigger than a typed `·`
+   (Siggie, 2026-09-17: *"make the dot bigger"*).
+
+   DRAWN, not typed. It was a `·` glyph at 1.7em, and that sat visibly low: a
+   `·` sits at about x-height inside its own em box, so scaling the box up
+   moves the mark DOWN relative to the text beside it, and `line-height: 0`
+   and `vertical-align: middle` both then fight the row's baseline alignment.
+   A drawn circle is sized and placed by its own box, so none of that depends
+   on what the host's font stack resolves to.
+
+   Generated rather than authored: it belongs to this layout only, and the
+   stacked form must not get one. The gap either side is the flex `gap` plus
+   this margin. */
+.help-popover-title-inline .help-popover-tour::after {
+  content: '';
+  display: inline-block;
+  width: 0.3em;
+  height: 0.3em;
+  border-radius: 50%;
+  background: currentcolor;
+  opacity: 0.75;
+  margin-left: 0.5em;
+  /* Lifts the circle off the baseline to the middle of the lowercase text.
+     `0.25em` is half the x-height of a typical face at this size -- the one
+     font-dependent number left, and it moves the mark by a pixel or two at
+     worst rather than dropping it to the baseline. */
+  vertical-align: 0.25em;
+}
+
+/* Which tour the step belongs to, in front of its title (TASKS 1c). Quieter
+   than the title on every axis -- size, weight, colour -- so it reads as a
+   label on the title rather than as a second title. */
+.help-popover-tour {
+  display: block;
+  font-size: 0.7em;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--help-muted, #6b7280);
+  margin-bottom: 2px;
+}
+
+/* `.help-prose` — the same markdown block styles, for a caller OUTSIDE the
+   popover.
+
+   `<HelpMarkdown>` lets any component render a string the way a step's prose
+   renders (TASKS `markdown-everywhere`), and the legend is the first to use
+   it. Those callers need the paragraph, list and code styles below just as
+   much as the popover does, and duplicating the block into a second class is
+   how the two come to disagree. So every selector that styles markdown OUTPUT
+   names both; the ones that style the popover's own chrome (scrolling, the
+   dimmed past beat) stay on `.help-popover-body` alone, because they are about
+   the popover and not about markdown. */
+/* SUBTITLE inside a description: write `### text` in the markdown.
+   *
+   Every heading level collapses to one style deliberately. The popover is a
+   few short paragraphs, not a document -- a real heading hierarchy inside it
+   would be a second outline competing with the tour's own, and an author
+   picking between `###` and `####` is choosing something the reader cannot
+   see. So any heading is "a subtitle", and the level is just how it reads in
+   the file.
+
+   Below the title, above `**bold**`: smaller and lighter than the title so it
+   cannot be confused with it, but set apart from the body by weight and
+   colour so it does not read as another bold run. */
+.help-popover-body :is(h1, h2, h3, h4, h5, h6),
+.help-prose :is(h1, h2, h3, h4, h5, h6) {
+  margin: 10px 0 4px;
+  font-size: 1em;
+  font-weight: 600;
+  line-height: 1.3;
+  color: #334155;
+}
+/* A subtitle opening the block has no preceding text to separate from. */
+.help-popover-body > :first-child :is(h1, h2, h3, h4, h5, h6),
+.help-popover-body > :is(h1, h2, h3, h4, h5, h6):first-child,
+.help-prose > :first-child :is(h1, h2, h3, h4, h5, h6),
+.help-prose > :is(h1, h2, h3, h4, h5, h6):first-child { margin-top: 0; }
+
+.help-popover-body p,
+.help-prose p,
+.help-popover-context p { margin: 0 0 6px; }
+
+/* Markdown BLOCK content in the body. `Description:` is read as a multi-line
+   markdown block (2026-08-28), so a step's prose can carry lists and several
+   paragraphs the way the draft was written -- these are the styles that block
+   needs and a one-line description never did. */
+.help-popover-body :is(ul, ol),
+.help-prose :is(ul, ol) {
+  margin: 0 0 6px;
+  /* `list-style` is restored explicitly: the app's Tailwind preflight resets
+     `ul` to `list-style: none`, so a list in a description rendered as
+     unmarked indented lines -- readable as prose, but not as a list. The
+     popover's CSS is meant to be self-contained (it moves into a package), so
+     it cannot assume the host has or has not reset anything. */
+  list-style: disc outside;
+  padding-left: 18px;
+}
+.help-popover-body ol,
+.help-prose ol { list-style: decimal outside; }
+.help-popover-body li,
+.help-prose li {
+  margin: 2px 0;
+  /* Preflight also sets `display: list-item` off in some resets; naming it
+     keeps the marker whatever the host did. */
+  display: list-item;
+}
+.help-popover-body > :last-child,
+.help-prose > :last-child { margin-bottom: 0; }
+.help-popover-body code,
+.help-prose code {
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: #f1f5f9;
+  font-size: 0.92em;
+}
+
+/* A block kept from an earlier beat.
+
+   Only `Keep: true` beats produce these now -- beats REPLACE by default
+   (2026-08-28), so most positions have a single block and nothing to dim.
+
+   The fade is deep because it has to be: the popover's TEXT colour is #0f172a
+   (inherited from `.help-popover`), near-black, so the NEW block has nowhere
+   to go brighter and every bit of range is on the dim side.
+
+   **The blue rule and entrance animation that used to live here are gone.**
+   They were added to make the newest block findable at the bottom of an
+   accumulating stack, and they did not do it -- Siggie: "the blue line isn't
+   quite doing it", which is what prompted inverting the default. On a replacing
+   beat there is nothing to find: the popover holds one thought and it is the
+   new one. Keeping the mark would have put a rule down every popover in the
+   tour to distinguish a block from nothing. */
+.help-popover-body .help-beat-past {
+  opacity: 0.38;
+  transition: opacity 200ms ease;
+}
+
+/* Links. react-markdown has always rendered `[text](url)` as a real `<a>`, but
+   nothing here styled one, so it inherited the popover's body colour with no
+   underline and read as plain text -- Siggie, 2026-08-28: "links in `app-title`
+   Description markdown are rendered as plain text". They open in a new tab
+   because leaving the page mid-tour would throw away the tour's state. */
+.help-popover a,
+.help-prose a {
+  color: #0369a1;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.help-popover a:hover,
+.help-prose a:hover { color: #0284c7; }
+
+/* The ACTION band: what the tour just DID.
+
+   Deliberately unlike the body — tinted, ruled down the left, checked, and in
+   the smaller size the app uses for chrome — because the whole bug it fixes is
+   that "I ticked this for you" read as "here is what you are looking at". Two
+   different kinds of sentence must not look like one paragraph. */
+.help-popover-action {
+  display: flex;
+  gap: 7px;
+  margin: 0 0 8px;
+  padding: 6px 8px;
+  border-left: 3px solid #0284c7;
+  border-radius: 0 5px 5px 0;
+  background: #f0f9ff;
+  font-size: 0.92em;
+  color: #075985;
+}
+.help-popover-action p { margin: 0; }
+.help-popover-action p + p { margin-top: 4px; }
+.help-popover-action-mark {
+  flex: none;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+/* The ALERT: something the reader needs to know, written as a markdown `>`
+   blockquote in any description or beat.
+
+   Deliberately a sibling of the action band above and deliberately not the
+   same colour. Two bands that look alike would collapse back into the single
+   undifferentiated paragraph the action band exists to break up: blue-and-✓
+   is "the tour did this to your app", amber-and-! is "read this". */
+.help-popover-alert {
+  display: flex;
+  gap: 7px;
+  margin: 8px 0;
+  padding: 6px 8px;
+  border-left: 3px solid #d97706;
+  border-radius: 0 5px 5px 0;
+  background: #fffbeb;
+  font-size: 0.92em;
+  color: #92400e;
+}
+.help-popover-alert p { margin: 0; }
+.help-popover-alert p + p { margin-top: 4px; }
+.help-popover-alert-mark {
+  flex: none;
+  font-weight: 700;
+  line-height: 1.45;
+}
+.help-popover-alert kbd {
+  padding: 1px 5px;
+  border: 1px solid #fcd34d;
+  border-radius: 4px;
+  background: #fef3c7;
+  font-family: ui-monospace, monospace;
+  /* 0.92em of the 0.92em alert, NOT of the base: lands on 11px. */
+  font-size: 0.92em;
+}
+/* The `Once:` opt-out. Quieter than the note it sits under -- it is the
+   footnote to the alert, not a second thing to read. */
+.help-popover-alert-once {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  margin-top: 6px;
+  /* Nested in the 0.92em alert -- 0.92em of that is 11px. */
+  font-size: 0.92em;
+  opacity: 0.85;
+  cursor: pointer;
+}
+.help-popover-alert-once input { margin: 0; cursor: pointer; }
+
+
+.help-popover-interactions {
+  margin: 6px 0;
+  /* Same preflight reset as the body's lists -- these have been rendering as
+     unmarked indented lines since the popover shipped. */
+  list-style: disc outside;
+  padding-left: 18px;
+}
+.help-popover-interactions li { margin: 2px 0; display: list-item; }
+.help-popover-interactions p { margin: 0; }
+
+.help-popover-shortcut {
+  margin: 6px 0 0;
+  font-size: 0.92em;
+  color: #475569;
+}
+.help-popover-shortcut kbd {
+  padding: 1px 5px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  background: #f1f5f9;
+  font-family: ui-monospace, monospace;
+  /* 0.92em of the 0.92em shortcut line, NOT of the base: lands on 11px. */
+  font-size: 0.92em;
+}
+
+.help-popover-context {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #e2e8f0;
+  font-size: 0.92em;
+  color: #475569;
+}
+
+.help-tour-nav {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid #e2e8f0;
+}
+/* The row is a flex line of fixed-size controls, so at a narrow width it used
+   to squash the buttons and overrun the card -- Siggie, 2026-09-08: "too
+   narrow popover mangling the status line". `navMinWidth` in HelpLayer.tsx
+   floors the popover at what the CONTROLS need; these rules settle who gives
+   way when the dots make the row longer than that: the buttons and the
+   counter refuse to shrink, and the dots wrap onto a second line. A progress
+   hint yields to a control, and never widens the popover. */
+.help-tour-nav button,
+.help-tour-count { flex: none; }
+.help-tour-spacer { flex: 1; }
+.help-tour-count { font-size: 0.85em; color: #64748b; }
+
+/* Reveal dots: progress through one step's beats, beside the step counter.
+   A SECOND widget rather than a second number, because the fraction counts
+   steps and a `2.1 / 6` mixes two scales in one reading -- `2.1` is not a
+   position out of 6. Hidden entirely on a step with no beats. */
+.help-tour-dots {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  align-items: center;
+  margin-left: 6px;
+  /* Shrinkable, and the only thing in the row that is. A step with twenty
+     screens shows two short rows of dots rather than forcing a wider popover
+     (Siggie, 2026-09-08: "better might be to allow the dots to wrap"). */
+  min-width: 0;
+}
+.help-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #cbd5e1;
+  transition: background 160ms ease;
+}
+.help-dot-on { background: #0284c7; }
+
+/* Authoring aid: the popover's address in
+   help-content.md, click-to-copy. Deliberately the quietest thing in the
+   popover -- it is for whoever is editing the content, not for a viewer, and
+   the Help menu item that turns it on only exists in a dev build. Monospace
+   because it is a file identifier and reads as one. Delete with the toggle. */
+.help-popover-address {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72em;
+  color: #94a3b8;
+  text-align: right;
+  cursor: pointer;
+}
+.help-popover-address:hover { color: #0284c7; }
+
+.help-tour-nav button {
+  padding: 3px 9px;
+  border: 1px solid #cbd5e1;
+  border-radius: 5px;
+  background: #f8fafc;
+  font-size: 0.92em;
+  cursor: pointer;
+}
+.help-tour-nav button:hover:not(:disabled) { background: #e2e8f0; }
+.help-tour-nav button:disabled { opacity: 0.4; cursor: default; }
+.help-tour-nav button.help-tour-next {
+  border-color: #0284c7;
+  background: #0284c7;
+  color: #fff;
+}
+.help-tour-nav button.help-tour-next:hover { background: #0369a1; }
+
+/* The app is theme-aware, so the popover must be too — a white card in dark
+   mode is the kind of thing a stakeholder notices immediately. */
+/* PARKED. Was `@media (prefers-color-scheme: dark)`. The app is light-mode
+   only -- App.tsx banners dark-mode viewers with "Dark mode is not yet
+   supported" -- but this block is plain CSS and fired anyway, so the popover
+   was the ONE dark thing in an otherwise light app. Siggie, 2026-08-28, on
+   seeing it: "seems like it's only affecting the popovers".
+
+   Neutralised by a query that never matches rather than by commenting out,
+   because the block contains its own comments and a nested close marker would
+   terminate the outer one early. To restore real dark support, change this
+   line back to `prefers-color-scheme: dark`. */
+@media (min-width: 99999px) {
+  .help-popover {
+    border-color: #334155;
+    background: #0f172a;
+    color: #e2e8f0;
+  }
+  .help-popover-context,
+  .help-popover-shortcut { color: #94a3b8; }
+  .help-popover-action {
+    background: #082f49;
+    color: #bae6fd;
+  }
+  .help-popover-alert {
+    border-left-color: #f59e0b;
+    background: #38230a;
+    color: #fde68a;
+  }
+  .help-popover-alert kbd {
+    border-color: #78350f;
+    background: #451a03;
+  }
+  .help-popover-context,
+  .help-tour-nav { border-top-color: #1e293b; }
+  .help-popover-shortcut kbd {
+    border-color: #334155;
+    background: #1e293b;
+  }
+  .help-tour-nav button {
+    border-color: #334155;
+    background: #1e293b;
+    color: #e2e8f0;
+  }
+  .help-tour-nav button:hover:not(:disabled) { background: #334155; }
+  .help-hint { box-shadow: 0 0 0 2px #0f172a; }
+  .help-dot { background: #334155; }
+  .help-dot-on { background: #38bdf8; }
+  .help-popover-address { color: #64748b; }
+  .help-popover-address:hover { color: #38bdf8; }
+  /* #0369a1 on the dark card fails contrast; the lighter end of the same
+     ramp keeps links reading as links in both themes. */
+  .help-popover a { color: #7dd3fc; }
+  .help-popover a:hover { color: #bae6fd; }
+  .help-popover-body code { background: #1e293b; }
+  /* The dark card's body TEXT is #e2e8f0, so the fade has more room to work
+     with than it does on white and does not need to go as deep. */
+  .help-popover-body .help-beat-past { opacity: 0.45; }
+}
+
+/* ── The tour map ────────────────────────────────────────────────────────
+   The outline panel behind the ⊞ on the counter line, and behind the
+   chooser's Overview row. See TourMap.tsx for why it is a panel and not an
+   expansion of the popover.
+
+   CENTRED on a dimmed backdrop rather than tucked into a corner. It was a
+   20rem panel pinned bottom-left; Siggie, 2026-09-08: "I was imagining these
+   bigger and more centered". It is a thing you stop and read, like the
+   chooser, not a inspector you keep open beside your work -- and it closes
+   as soon as you pick a step, so it is never in the way of the diagram. */
+.help-map-backdrop {
+  position: fixed;
+  inset: 0;
+  /* The map is a `popover="manual"` element in the TOP LAYER (see TourMap.tsx),
+     which is what actually puts it above the step popover -- no z-index can,
+     since the top layer outranks every one of them. This value only orders it
+     against the app for the moment before `showPopover()` runs. */
+  z-index: 2147483646;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgb(15 23 42 / 0.28);
+
+  /* Undo the UA stylesheet's defaults for `[popover]`, which would otherwise
+     shrink the full-screen backdrop to a bordered box in the middle of the
+     viewport: `inset: 0` above is overridden by the UA's `inset: auto`, and
+     `width/height: fit-content` collapses it around the panel. */
+  margin: 0;
+  max-width: none;
+  max-height: none;
+  width: auto;
+  height: auto;
+  border: none;
+  overflow: visible;
+  color: inherit;
+}
+.help-map {
+  /* The same knob the popover uses, and for the same reason: the map is
+     help-package UI, so the host's one font-size override has to move it too.
+     Declared here rather than inherited because the panel is portalled to
+     `document.body` and so is not inside `.help-popover`, where the property
+     is set. A host that overrides it for `.help-popover` alone would
+     otherwise leave the map at the package default. */
+  --help-font-size: 13px;
+  font-size: var(--help-font-size);
+
+  width: min(34rem, 100%);
+  max-height: min(46rem, 100%);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 20px 50px rgb(15 23 42 / 0.3);
+  color: #0f172a;
+}
+.help-map-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 14px 18px 10px;
+  border-bottom: 1px solid #e2e8f0;
+}
+.help-map-head h2 { margin: 0; font-size: 1.3em; font-weight: 600; }
+.help-map-head p { margin: 3px 0 0; font-size: 0.92em; color: #64748b; }
+.help-map-close {
+  border: 0;
+  background: none;
+  font-size: 1.2em;
+  line-height: 1;
+  color: #94a3b8;
+  cursor: pointer;
+}
+.help-map-close:hover { color: #334155; }
+.help-map-body { overflow-y: auto; padding: 8px; }
+
+.help-map-step {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font-size: 1.05em;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+}
+.help-map-step:hover { background: #f1f5f9; }
+/* The current step is marked by WEIGHT and a rule, not by a fill: the map
+   opens over a diagram, and a solid highlight competes with the popover's
+   own ring for "the thing you are looking at". */
+.help-map-step-here {
+  font-weight: 600;
+  box-shadow: inset 2px 0 0 #0284c7;
+}
+.help-map-num {
+  flex: none;
+  min-width: 1.4em;
+  font-variant-numeric: tabular-nums;
+  color: #94a3b8;
+  font-size: 0.9em;
+}
+.help-map-step-here .help-map-num { color: #0284c7; }
+.help-map-title { flex: 1; }
+/* How many screens the step runs to, right-aligned and quiet. A length
+   warning, not a number anyone needs to read precisely. */
+.help-map-beats {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 9px;
+  background: #f1f5f9;
+  color: #94a3b8;
+  font-size: 0.8em;
+}
+
+.help-map-tour { margin-bottom: 10px; }
+.help-map-tour + .help-map-tour {
+  padding-top: 10px;
+  border-top: 1px solid #f1f5f9;
+}
+.help-map-tourname {
+  display: block;
+  width: 100%;
+  padding: 5px 10px 2px;
+  border: 0;
+  background: none;
+  font-size: 1.1em;
+  font-weight: 600;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+}
+.help-map-tourname:hover { color: #0284c7; }
+.help-map-blurb {
+  margin: 0 0 5px;
+  padding: 0 10px;
+  font-size: 0.9em;
+  color: #64748b;
+}
+
+/* The ⊞ that opens the map, on the counter line. Quiet until hovered — it is
+   a way out of the tour's linear path, not a step in it. */
+.help-tour-map-btn {
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  font-size: 0.95em;
+  line-height: 1;
+  color: #94a3b8;
+  cursor: pointer;
+}
+.help-tour-map-btn:hover { color: #0284c7; }

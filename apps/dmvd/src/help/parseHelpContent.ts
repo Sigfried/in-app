@@ -1,0 +1,1447 @@
+/**
+ * Parse the structured help-content.md into typed data.
+ * Pure function, no dependencies beyond types.
+ *
+ * Ported from icd11-playground (web/src/utils/parseHelpContent.ts). The
+ * `change`, `tour`, `anchor`, `action` and `beats` fields are dmvd additions;
+ * everything else is unchanged. Kept dependency-free so it can move into the
+ * shared help package without edits (docs/HELP_PACKAGE_PLAN.md).
+ *
+ * The authoring format is specified in FORMAT.md, beside this file — that doc
+ * is the spec, this file is its implementation. The CONTENT written against it
+ * belongs to the app, not to this package: dmvd's is
+ * `src/explore/help-content.md`.
+ */
+
+import { applyLinkTargets } from './linkTarget';
+
+/**
+ * What a step points at. The parser deliberately does NOT interpret the
+ * `kind:argument` form: knowing what an `entity-row` IS belongs to the host, and
+ * this file has to stay host-agnostic for the package extraction. It splits the
+ * pair and stops; the host decides what each kind means by choosing which
+ * elements to tag with it. See `HelpEntry.anchor`.
+ */
+export type HelpAnchor =
+  /** No anchor: centre the popover, ring nothing. Authored as `Anchor: none`. */
+  | { kind: 'none' }
+  /** `kind:argument`, matched at runtime against a host-written `data-help-id`. */
+  | { kind: string; arg: string };
+
+/**
+ * One beat within a tour step: the step keeps its popover and advances
+ * through these before moving on. Covers both nested sub-steps and
+ * reveal-the-next-bullet, which are the same mechanism.
+ */
+export interface TourBeat {
+  /** Markdown shown for this beat. */
+  /**
+   * The numbered line. An AUTHORING LABEL — it names the beat in the file and
+   * is NOT rendered (2026-09-08). Free to be terse or repetitive; write for
+   * whoever is editing, not for a viewer.
+   */
+  text: string;
+  /** The beat's viewer-facing prose. Multi-line. This is what renders. */
+  description?: string;
+  /**
+   * Keep what is already showing and add this beat below it, instead of
+   * replacing the popover's contents with this beat alone.
+   *
+   * **Beats REPLACE by default; `Keep: true` is the opt-in to accumulate.**
+   *
+   * This is the inverse of what shipped earlier the same day, and the reason
+   * is that accumulation did not do the one job it was for. Under
+   * accumulate-by-default the newest text sits at the BOTTOM of a growing
+   * block, and however hard the old text is dimmed the eye still has to find
+   * where to start -- a blue rule and an entrance animation were both tried
+   * first (see WORKLOG). Siggie, 2026-08-28: *"the blue line isn't quite doing
+   * it. let's change the default to Clear: true."* A beat that replaces has no
+   * such problem: what is on screen IS the new thing.
+   *
+   * Accumulation stays available because a genuine reveal-the-list step still
+   * wants it -- it just is not what most beats are.
+   */
+  keep?: boolean;
+  /** Overrides the step's anchor while this beat is showing. */
+  anchor?: HelpAnchor;
+  /** Overrides the step's `Spotlight:` while this beat is showing. */
+  spotlight?: HelpAnchor[];
+  /** What the tour DID on entering this beat; rendered in its own band. */
+  action?: string;
+  /** What this beat ADDS to the app state, as a URL query. See `HelpEntry.change`. */
+  change?: string;
+  /** True when the beat's change came from `Only:`. See `HelpEntry.replace`. */
+  replace?: boolean;
+  /** Overrides the step's `Highlight:` for this beat. */
+  highlight?: Highlight;
+  /** Overrides the step's `Width:` for this beat. */
+  width?: number;
+  /** Overrides the step's `Position:` for this beat. */
+  position?: PopoverSide;
+  /** Overrides the step's `OffsetX:` for this beat. */
+  offsetX?: Offset;
+}
+
+export interface HelpEntry {
+  id: string;
+  title: string;
+  description: string;
+  interactions: string[];
+  shortcut?: string;
+  context?: string;
+  /**
+   * What this entry points at. Omitted in the markdown means "the element
+   * tagged `data-help-id="<id>"`", which is normalised here to
+   * `{ kind: 'help-id', arg: id }` so consumers never special-case the
+   * default. `Anchor: none` gives `{ kind: 'none' }`.
+   */
+  anchor: HelpAnchor;
+  /**
+   * One sentence saying what the tour just did to the app, in the tour's own
+   * voice. A step that changes the view without saying so reads as a
+   * description of whatever appeared -- the bug this field exists to fix.
+   */
+  action?: string;
+  /**
+   * Storage key under which this entry's ALERTS may be dismissed for good.
+   *
+   * Only alerts, and only when the author asks for it: a `> blockquote` in an
+   * entry with no `Once:` is permanent, which is what you want for a caution
+   * that is true every time you read the step. `Once:` is for the other kind
+   * — the orientation note a first-time visitor needs and a returning one
+   * should not have to dismiss again.
+   *
+   * The KEY is authored rather than derived from the entry id so that the same
+   * "you can leave with Escape" note can be written into several entries and
+   * silenced by all of them at once, and so renaming an entry does not
+   * resurrect a note the viewer already put away.
+   */
+  once?: string;
+  /**
+   * What this step ADDS to the app state, as a URL query in the same
+   * vocabulary as a share link (e.g. `sel=BodySite~Person`).
+   *
+   * A DELTA, not a state: a param the step does not name is a param the step
+   * does not touch. Entering the step pushes this onto the tour's stack and
+   * `back` pops it, so `back` is exact without the step having to describe the
+   * whole world — and so a field no step mentions is never disturbed.
+   *
+   * This was `state`, a full absolute query, until 2026-08-27. The rename is
+   * load-bearing: the values look identical either way, and reading an old one
+   * as a delta inverts its meaning (docs/TASKS.md item 2).
+   *
+   * Also set by `Only:`, which carries the same query but replaces rather than
+   * adds — see `replace`.
+   */
+  change?: string;
+  /**
+   * True when this step's `change` was authored as `Only:` rather than
+   * `Change:`: the named selection REPLACES the canvas instead of adding to it.
+   *
+   * **One field, two verbs, rather than two fields.** `change` is threaded as a
+   * bare query string from the parser through `TourPosition` to the host's
+   * push handler; a parallel `only?: string` would double every one of those
+   * sites and let a step declare both at once. A mode flag beside the query
+   * cannot express that contradiction.
+   *
+   * **Why it exists.** `Change:` is additive by design, which is right for a
+   * step that grows a picture one box at a time. It is wrong for a step whose
+   * copy describes a specific small canvas — the category content views (8-14
+   * classes each) and the two/three-box examples in the Ownership tour. Those
+   * accumulated into each other, so by the last category step the canvas was
+   * most of the schema while the popover still named one category. Same
+   * failure `showCategoryView` already fixed for the ⊞ control, with the same
+   * reasoning: a view named "Clinical" has to BE Clinical.
+   *
+   * **Scalars are unaffected.** `Only: sel=A~B&dir=DOWN` replaces the
+   * SELECTION and sets `dir` exactly as `Change:` would. Replacing means
+   * "these are the classes on the canvas", not "reset the whole app" — that
+   * absolute-state model is the one deliberately removed on 2026-08-27, and
+   * nothing here brings it back.
+   */
+  replace?: boolean;
+  /**
+   * Which SIDE of the anchor the popover goes on: `left`, `right`, `top` or
+   * `bottom`. Authored as `Position: bottom`.
+   *
+   * Unset means the automatic rule (across the diagram's growth axis inside
+   * the canvas, otherwise the side of the anchor with more room). This is the
+   * override for when that rule picks badly — Siggie, 2026-08-28, after the
+   * relation-menu anchor put the popover straight over the menu it was
+   * describing.
+   */
+  position?: PopoverSide;
+  /**
+   * How hard to point at the anchor: `Highlight: ring` draws the ring without
+   * the scrim, `none` draws nothing at all. Unset means ring-plus-scrim.
+   *
+   * `none` still resolves the anchor, so the anchor keeps positioning the
+   * popover. Emphasis and placement are separate jobs and a step should be
+   * able to ask for one without the other (Siggie, 2026-08-28).
+   */
+  highlight?: Highlight;
+  /**
+   * `Spotlight: slot-row:Condition.affected_body_site` — the element the ring
+   * is drawn around, when that is NOT the anchor. `Anchor:` keeps placing the
+   * popover; this only moves the emphasis (Siggie, 2026-09-10: "highlight the
+   * affected_body_site row while staying anchored on Condition"). Same
+   * grammar as `Anchor:`; `Highlight:` still says how hard to draw it, so
+   * `Highlight: none` draws nothing here either.
+   *
+   * **A list rings several elements at once**, comma- or `~`-separated, the
+   * separators `sel=` and `cat=` already take. That needs `Highlight: ring`:
+   * the default spotlight dims the page with a `0 0 0 9999px` shadow, and N of
+   * those stack into N layers of dimming, each ring's hole darkened by the
+   * others. One scrim with several holes wants `clip-path`, which is a bigger
+   * change than this was (2026-09-16); `helpContent.test.ts` fails a
+   * multi-target spotlight that does not ask for the ring.
+   */
+  spotlight?: HelpAnchor[];
+  /**
+   * How wide the popover is for this step, in CSS pixels. `Width: 480`.
+   *
+   * The default 320 is sized for a step's worth of prose. A step that carries
+   * real exposition -- the intro, which explains what the app IS -- reads badly
+   * in a narrow column (Siggie, 2026-08-28). Values below 240 are ignored, and
+   * the width is capped to the viewport at render.
+   */
+  width?: number;
+  /**
+   * Horizontal nudge in CSS pixels, applied after placement. `OffsetX: 260`,
+   * or in terms of the anchor's own size: `OffsetX: anchor.width * 1.3`.
+   *
+   * The multiplier form is the useful one for the canvas: every entity box is
+   * the same width today, so `anchor.width * 1.3` clears one box plus a gutter
+   * and leaves room for the box the step is about to add (Siggie's own
+   * example). Writing it relative to the anchor rather than as a constant
+   * keeps it correct if NODE_W changes.
+   */
+  offsetX?: Offset;
+  /**
+   * Which tour this entry is a step of, e.g. `Tour: Walkthrough`. Entries
+   * without it are help-only: reachable in help mode, never visited by a tour.
+   *
+   * **The name is the whole field; ORDER COMES FROM THE FILE.** This was a
+   * 1-based number until 2026-08-28, which made inserting a step a
+   * renumbering of every step after it, and made a duplicate or a gap a silent
+   * reorder. Position is now the entry's position in `help-content.md`, so
+   * moving a step is moving its block and there is no number to collide.
+   *
+   * A bare `- **Tour:**` with no value means the default tour, so a file with
+   * one tour never has to name it.
+   */
+  tour?: string;
+  /**
+   * Where this entry sits in the source file. The tour is ordered by it, so
+   * the parser has to record it: `content.entries` is a Map and sections are
+   * parsed block by block, neither of which preserves a usable index on its
+   * own.
+   */
+  order: number;
+  /**
+   * Ordered beats within this step. Absent means the step is a single
+   * implicit beat, which is how every step written before beats existed
+   * continues to behave.
+   */
+  beats?: TourBeat[];
+}
+
+/**
+ * A `## Section` grouping. Organises the source file; nothing in the app
+ * renders a section's `title` or `body` today — the popover shows one entry at
+ * a time, and both the tour and help mode reach entries through
+ * `HelpContent.entries`, never through sections.
+ *
+ * **`body` is unused, not unsupported.** It is parsed and kept for a help mode
+ * that wants section intros. Do not conclude from "nothing reads it" that
+ * sections can be flattened away: their `## ` headings are what
+ * `parseHelpContent` splits on, a section body is where `TourMetadata:`
+ * lives, and they keep the content file legible.
+ */
+export interface HelpSection {
+  id: string;
+  title: string;
+  /** Text between the `##` heading and the first `###` entry. Rendered nowhere. */
+  body: string;
+  entries: HelpEntry[];
+  /**
+   * The tour this section describes, when its body carries a
+   * `- **TourMetadata:**` line. See `TourMeta`.
+   */
+  tourMeta?: TourMeta;
+}
+
+/**
+ * What a tour IS, as opposed to what its steps say — the name and a sentence
+ * describing it, for a chooser that offers several tours.
+ *
+ * **Authored in a section's body, not on an entry**, because it belongs to the
+ * tour as a whole and a tour has no entry of its own; its steps are entries.
+ * Written between the `## ` heading and the first `### ` entry:
+ *
+ * ```markdown
+ * ## The BioData Catalyst Harmonized Model
+ * - **TourMetadata:** The BioData Catalyst Harmonized Model
+ * - **Description:** Introduction to the model: what it contains and what it's for
+ * ```
+ *
+ * `TourMetadata:` names the tour, and the name must match the `Tour:` field on
+ * the steps — that is what ties the description to the walk. A section with no
+ * `TourMetadata:` is an ordinary grouping section and gets none of this.
+ *
+ * A tour with steps but no metadata still runs; the chooser falls back to its
+ * name and shows no description. Metadata naming a tour with no steps is the
+ * error worth catching, and a test does.
+ */
+export interface TourMeta {
+  /** The tour's name, matching the `Tour:` field on its steps. */
+  name: string;
+  /** One sentence for the chooser. Markdown allowed. */
+  description: string;
+  /**
+   * A short form of the name for the popover, which prefixes every step's
+   * title with the tour it belongs to (TASKS 1c, Siggie 2026-09-09: *"Tour
+   * steps don't tell you what tour you're on"*). Absent, the full name is
+   * used -- so a tour only authors one when its name is too long to sit in
+   * front of a title.
+   */
+  abbr?: string;
+}
+
+export interface HelpContent {
+  sections: HelpSection[];
+  entries: Map<string, HelpEntry>;
+  /**
+   * Tour descriptions, keyed by tour name, gathered from every section that
+   * carries a `TourMetadata:` block. What a tour chooser reads.
+   */
+  tourMeta: Map<string, TourMeta>;
+  /**
+   * What the parser could read but not accept: a field line whose name is
+   * not one the file's format knows at that level (`- Anchr: x`). Empty for
+   * a clean file. Optional so a test can build a content literal without it.
+   */
+  problems?: string[];
+}
+
+/**
+ * One navigable position in the tour: a step, plus which of its beats is
+ * showing. This is the shape the tour mechanism (S3b) navigates -- flattening
+ * happens here so the mechanism never has to know that beats are nested.
+ */
+export interface TourPosition {
+  entry: HelpEntry;
+  /**
+   * 1-based step number WITHIN ITS TOUR, computed from file order rather than
+   * read off the entry — `entry.tour` is the tour's name now, not a position.
+   */
+  step: number;
+  /**
+   * 0-based index into `entry.beats`; **-1 at a step's opening position**,
+   * which shows the description alone before any beat has revealed. A step
+   * with no beats has exactly that one position.
+   */
+  beatIndex: number;
+  /**
+   * How many beats this step has, for the reveal dots beside the counter.
+   * 0 when the step has none, in which case the popover shows no dots.
+   */
+  beatCount: number;
+  /** The beat itself, if this step has any. */
+  beat?: TourBeat;
+  /** Elements to ring INSTEAD of the anchor; a beat's wins over its step's. */
+  spotlight?: HelpAnchor[];
+  /** Emphasis for this position; a beat's wins over its step's. */
+  highlight?: Highlight;
+  /** Popover width for this position; a beat's wins over its step's. */
+  width?: number;
+  /** Placement override for this position; a beat's wins over its step's. */
+  position?: PopoverSide;
+  /** Horizontal nudge for this position; a beat's wins over its step's. */
+  offsetX?: Offset;
+  /**
+   * Everything showing at this position, oldest first: the step's description
+   * followed by each beat revealed so far. The LAST block is the one that just
+   * appeared; the popover renders the earlier ones dimmed, so a reveal reads as
+   * "and now this" rather than as a page of equal-weight prose.
+   *
+   * A step with no beats has exactly one block. A beat with `Clear: true`
+   * starts the list over at itself.
+   */
+  blocks: string[];
+  /**
+   * `blocks` joined, which is what a consumer that just wants the text of this
+   * position should read. Kept because it is the older shape and because
+   * nothing outside the popover needs to know about the reveal.
+   */
+  text: string;
+  /**
+   * Where this position is WRITTEN, for finding it in the content file:
+   * the entry's `###` slug, plus the 1-based beat ordinal when a beat is
+   * showing (`relationship-kinds \u25b82`). Shown only by the authoring
+   * toggle -- see `showAddresses` in `HelpApi`.
+   *
+   * The slug is the address because it is the one identifier here that is
+   * already unique, already required, and already survives reordering.
+   * Explicit `Tour: 3` numbers were removed on 2026-08-28 precisely because
+   * inserting a step renumbered every step after it; a derived address must
+   * not reintroduce that.
+   *
+   * Beats get an ordinal and nothing more. They have no anchor of their own
+   * in the file -- a beat is a markdown list item -- so there is nothing
+   * finer to point at, and Siggie's call (2026-09-07) is that counting the
+   * bullets by eye is easier than any string a beat could offer.
+   */
+  address: string;
+  /**
+   * What clicking the address copies: the entry's markdown HEADER, `### id`.
+   *
+   * Not the same string as `address`, deliberately. `address` is for READING
+   * on screen, where the beat ordinal is the useful half; this is for PASTING
+   * into a file search, where `### entities` lands on the one heading and a
+   * bare `entities` also hits every prose mention of the word. Siggie,
+   * 2026-09-07: *"what you should copy to clipboard, say for id==entities is
+   * `### entities`"*.
+   *
+   * The beat ordinal is deliberately NOT in here — it is a count you read off
+   * the bullets once the search has taken you to the header, and appending it
+   * would break the match.
+   */
+  searchFor: string;
+  /** Beat's anchor if it overrides, else the step's. */
+  anchor: HelpAnchor;
+  /** Beat's action if it has one, else the step's. */
+  action?: string;
+  /**
+   * What this POSITION pushes onto the tour's state stack, or undefined if it
+   * pushes nothing. A beat's own `Change:` if it declares one; otherwise the
+   * step's, but only on its first beat — see `tourPositions`.
+   */
+  change?: string;
+  /**
+   * Whether this position's `change` REPLACES the selection rather than adding
+   * to it (`Only:` rather than `Change:`). Travels with `change` and is
+   * meaningless without it.
+   */
+  replace?: boolean;
+}
+
+/**
+ * How much emphasis the anchor gets, as authored by `Highlight:`.
+ *
+ *  - `dim` (the default): the ring PLUS the scrim over everything else.
+ *  - `ring`: the ring alone. For a step whose anchor is one control among
+ *    several the reader is meant to compare, where dimming the rest hides the
+ *    context the step is talking about.
+ *  - `none`: draw nothing. The anchor still resolves, so it still POSITIONS
+ *    the popover -- which is the point: a step can point the popover at
+ *    something without visually seizing it.
+ */
+export type Highlight = 'dim' | 'ring' | 'none';
+
+/**
+ * Where the popover goes, as authored by `Position:` — a CSS `position-area`.
+ *
+ * `left`, `right`, `top` and `bottom` are this format's own shorthands, mapped
+ * in `HelpLayer`; anything else is passed to CSS verbatim, so an author can
+ * write any value the property takes (`center`, `span-all`, `block-end
+ * span-inline-start`, …) without this package tracking the grammar. A string
+ * rather than a union for that reason — there is no list to keep current.
+ *
+ * An invalid value is dropped by the browser and the popover falls back to its
+ * automatic placement, so a typo costs the override rather than the tour. The
+ * content test is what catches it: it checks every authored `Position:` with
+ * `CSS.supports`, the browser's own grammar.
+ */
+export type PopoverSide = string;
+
+/**
+ * A parsed `OffsetX:` — pixels, or a multiple of one of the anchor's own
+ * dimensions.
+ *
+ * Deliberately NOT a general expression. `anchor.width * 1.3` is the shape
+ * Siggie asked for, and a closed grammar that covers it is a regex; anything
+ * that would evaluate authored arithmetic is a code path taking input from a
+ * markdown file, for no reader-visible gain.
+ */
+export type Offset =
+  | { px: number }
+  | { of: 'width' | 'height'; times: number };
+
+/**
+ * `Width: 480` — the popover's width in CSS pixels for this step.
+ *
+ * Clamped to a sane band rather than trusted: below ~240 the prose is a column
+ * of single words, and a popover wider than the viewport is not a popover.
+ * The upper bound is applied at render, where the viewport width is known.
+ */
+function parseWidth(value: string | undefined): number | undefined {
+  const n = Number(value?.trim());
+  return Number.isFinite(n) && n >= 240 ? n : undefined;
+}
+
+/**
+ * `Highlight: ring|dim|none`. Like `Position:`, an unrecognised value is
+ * ignored rather than throwing, so a typo costs the override and not the tour.
+ */
+function parseHighlight(value: string | undefined): Highlight | undefined {
+  const v = value?.trim().toLowerCase();
+  return v === 'dim' || v === 'ring' || v === 'none' ? v : undefined;
+}
+
+/**
+ * `Position: left|right|top|bottom`, or any CSS `position-area` value.
+ *
+ * Passed through rather than checked against a keyword list: `position-area`
+ * has a large grammar, a list of it would go stale, and the browser already
+ * owns the real one. An unknown value reaches CSS, is dropped there, and the
+ * popover falls back to automatic placement — a typo costs the override, not
+ * the tour. `helpContent.test` validates the authored values with
+ * `CSS.supports` so a typo fails a test rather than only looking wrong.
+ */
+function parsePosition(value: string | undefined): PopoverSide | undefined {
+  const v = value?.trim().toLowerCase();
+  return v || undefined;
+}
+
+/**
+ * `OffsetX: 260` | `OffsetX: anchor.width * 1.3` | `OffsetX: -anchor.height`.
+ *
+ * `parentBox` is accepted as a synonym for `anchor`: that is the word Siggie
+ * used when asking for the field, and an author who writes it means the thing
+ * the popover is anchored to.
+ */
+function parseOffset(value: string | undefined): Offset | undefined {
+  const v = value?.trim();
+  if (!v) return undefined;
+
+  const num = Number(v);
+  if (Number.isFinite(num)) return { px: num };
+
+  const m = v.match(/^(-)?(?:anchor|parentBox)\.(width|height)(?:\s*\*\s*(-?[\d.]+))?$/i);
+  if (!m) return undefined;
+  const [, neg, dim, mult] = m;
+  const times = mult === undefined ? 1 : Number(mult);
+  if (!Number.isFinite(times)) return undefined;
+  return { of: dim.toLowerCase() as 'width' | 'height', times: neg ? -times : times };
+}
+
+/** Parse an `Anchor:` value into a HelpAnchor. `fallbackId` is the entry id. */
+export function parseAnchor(raw: string | undefined, fallbackId: string): HelpAnchor {
+  const value = raw?.trim();
+  // Omitted: point at the element tagged with this entry's own id. This is
+  // what every pre-Anchor help entry means, so they keep working untouched.
+  if (!value) return { kind: 'help-id', arg: fallbackId };
+  if (value === 'none') return { kind: 'none' };
+  const colon = value.indexOf(':');
+  // A bare id with no colon is shorthand for `help-id:<id>`.
+  if (colon === -1) return { kind: 'help-id', arg: value };
+  return { kind: value.slice(0, colon).trim(), arg: value.slice(colon + 1).trim() };
+}
+
+/**
+ * Parse a `Spotlight:` value: one anchor, or several separated by `,` or `~`.
+ *
+ * An HTML comment is stripped first — authors leave notes beside the field
+ * (`Spotlight: node-box:Visit <!-- and QuestionnaireItem -->`) and the comment
+ * would otherwise become part of the last anchor's `arg`.
+ *
+ * Returns undefined for an absent or empty field, so "no spotlight" stays
+ * distinct from "a spotlight that resolved to nothing".
+ */
+export function parseSpotlight(
+  raw: string | undefined, fallbackId: string,
+): HelpAnchor[] | undefined {
+  const value = raw?.replace(/<!--[\s\S]*?-->/g, '').trim();
+  if (!value) return undefined;
+  const parts = value.split(/[,~]/).map(s => s.trim()).filter(Boolean);
+  return parts.length ? parts.map(p => parseAnchor(p, fallbackId)) : undefined;
+}
+
+/**
+ * dmvd's spec now lives in its own FORMAT.md (2026-08-29), so no content file
+ * in this repo carries a `## Format` section any more. The name stays skipped
+ * anyway: an app is free to keep its spec inline in the content file — which
+ * is where it lived here until the split — and its `###` sub-headings would
+ * otherwise parse as entries pointing at nothing.
+ */
+const SPEC_SECTION = 'Format';
+
+/**
+ * The tour a bare `- **Tour:**` joins. Named tours exist so one file can hold
+ * several walks over the same entries (Siggie, 2026-08-28), but the common
+ * case is one tour, and making every step write its name would be noise.
+ */
+export const DEFAULT_TOUR = 'Walkthrough';
+
+/**
+ * Sections whose `###` headings are prose, not entries, and so are skipped by
+ * name. `Format` is an inline spec (see above); `TODO` is the authoring
+ * scratchpad at the top of dmvd's content file. An app adding a prose section
+ * of its own adds its name here. Without this a heading like
+ * `### Original unfinished draft text`
+ * parses as an entry with an anchor pointing at nothing — which is exactly
+ * what happened when the TODO section was added (Siggie, 2026-08-28: "Not sure
+ * if parser will complain about it").
+ */
+const PROSE_SECTIONS = new Set([SPEC_SECTION, 'TODO']);
+
+/**
+ * Structural markup that ends a multi-line field: the `<details>`/`</details>`
+ * wrappers that let each `## Section` fold when the file is read on GitHub,
+ * and their `<summary>`. These sit in the file for the READER; they are never
+ * part of an entry's content.
+ */
+const SECTION_MARKUP = /^<\/?(?:details|summary)\b[^>]*>$/i;
+
+/**
+ * Extract a field value like "**Title:** ..." from the lines.
+ *
+ * A field struck through is PARKED: still written down, but treated as absent.
+ * `- ~~**Tour:** Walkthrough~~` drops the entry out of the tour while leaving
+ * it available as help, which is how a step that is written but not ready
+ * stays in the file without appearing. Strikethrough rather than the earlier
+ * `_` prefix because a markdown editor reads `_Tour` as the start of italics
+ * (Siggie, 2026-09-11); `~~` renders as exactly what it means.
+ */
+/**
+ * `- Field: value`, tolerantly.
+ *
+ * The line is normalised before anything is compared: `**` stripped, name
+ * lower-cased. Two spellings of the same field used to mean two different
+ * outcomes -- entries required `- **Width:** 500`, beats required
+ * `- Width: 500`, and an entry field written the beat way parsed as NOTHING:
+ * no error, the step simply rendered as if it were absent. That is how
+ * `Width:` shipped broken on the intro step. Siggie: "the parser should just
+ * strip ** from the field lines (can't imagine needing them for something
+ * else)", and then, on case: the beat reader already lower-cased its field
+ * names, so requiring capitals here was an inconsistency rather than a rule.
+ *
+ * A struck-through field (`~~Tour:~~ x`, `~~Tour~~: x`, `~~Tour: x~~`) is
+ * parked: `fieldOf` still reads its name, so it ends a block like any field
+ * and is not reported as a misspelling, but no lookup matches it.
+ */
+function extractField(lines: string[], label: string): string | undefined {
+  /*
+   * Searched only ABOVE `- **Beats:**`, which is what now keeps an entry's
+   * fields apart from its beats'. The bold markers used to do that job by
+   * accident -- a beat's `- Change: x` could not match an entry's
+   * `- **Change:**` -- so dropping the distinction without scoping the search
+   * made a beat's `Change:` read as the entry's and the step push it twice
+   * (caught by "pushes its change exactly once").
+   *
+   * Beats are always last in an entry, so everything above the header is the
+   * entry's own field list.
+   */
+  const key = label.toLowerCase();
+  for (const line of lines) {
+    const field = fieldOf(line);
+    if (!field) continue;
+    // The beats header ends the entry's own field list, parked or not: the
+    // indented beat fields below it must not read as the entry's.
+    if (field.name === 'beats' && key !== 'beats') return undefined;
+    if (field.name === key && !field.parked) return field.value;
+  }
+  return undefined;
+}
+
+interface Field { name: string; value: string; parked: boolean }
+
+/**
+ * Split `- **Field:** value` into a lower-cased name and its value, with the
+ * `**` gone. Returns undefined for any line that is not a field bullet --
+ * ordinary prose bullets inside a `Description:` block included.
+ *
+ * Strikethrough marks the field PARKED. Three spellings, all read the same:
+ * `~~Field:~~ value`, `~~Field~~: value`, and the whole line after the bullet
+ * `~~Field: value~~`. Bold may sit inside or outside the tildes.
+ *
+ * ⚠️ **The `**` strip applies to the NAME only, never the value.** It used to
+ * run over the whole line, which silently ate an author's own bold: a
+ * `- **Action:** Clicked **Participant**` reached the popover as plain text
+ * while the identical `**` inside a `Description:` bolded fine, because a
+ * description is extracted as a block by `extractBlockField` and never passes
+ * through here (Siggie, 2026-09-18: "it looks like bold doesn't work, though
+ * it does in warning text"). Markdown belongs to the value; the `**` this
+ * removes is the FORMAT's own punctuation around the field name.
+ */
+function fieldOf(line: string): Field | undefined {
+  const m = line.trimStart().match(/^-\s+(.*)$/);
+  if (!m) return undefined;
+  /*
+   * Two views of the same line: `rest` with every `**` gone, used ONLY to find
+   * the name and the colon that ends it, and `raw` untouched, which the value
+   * is sliced from. Detection needs the stripped form (the name may be written
+   * `**Field:**`, `**Field**:` or bare); the value needs the original.
+   */
+  const raw = m[1].trim();
+  let rest = raw.replace(/\*\*/g, '').trim();
+  let parked = false;
+  if (rest.startsWith('~~')) {
+    const close = rest.indexOf('~~', 2);
+    if (close === -1) return undefined;
+    parked = true;
+    rest = close === rest.length - 2
+      ? rest.slice(2, close)                                    // ~~Field: value~~
+      : `${rest.slice(2, close)}${rest.slice(close + 2)}`;     // ~~Field:~~ value, ~~Field~~: value
+  }
+  const colon = rest.indexOf(':');
+  if (colon === -1) return undefined;
+  const name = rest.slice(0, colon).trim();
+  // A field name is a single word; anything else is prose that has a colon in
+  // it, which is common in a description's bullet list.
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) return undefined;
+  return { name: name.toLowerCase(), value: valueOf(raw, name), parked };
+}
+
+/**
+ * The text after `<name>:` in the ORIGINAL line, with the format's own `**` and
+ * `~~` around the name removed but the author's markdown left alone.
+ *
+ * Finds the name in the raw line rather than counting characters, because the
+ * stripped and raw forms are different lengths and an offset from one does not
+ * land in the other.
+ */
+function valueOf(raw: string, name: string): string {
+  const at = raw.toLowerCase().indexOf(name.toLowerCase());
+  if (at === -1) return raw.replace(/\*\*/g, '').trim();   // unreachable in practice
+  const after = raw.slice(at + name.length);
+  // Whatever punctuation closes the name -- `**`, `~~`, the colon -- then the
+  // value. A `~~Field: value~~` closes with tildes at the END of the line too,
+  // which is why the trailing pair is dropped as well.
+  const val = after.replace(/^(?:\*\*|~~)*\s*:\s*(?:\*\*|~~)*/, '');
+  return val.replace(/~~$/, '').trim();
+}
+
+/** The name of a LIVE (not parked) field on this line, for lookups by name. */
+const liveName = (line: string): string | undefined => {
+  const f = fieldOf(line);
+  return f && !f.parked ? f.name : undefined;
+};
+
+/**
+ * Field names each level of the file may carry. A `- Name: value` line at
+ * that level whose name is in none of these is a misspelling (`Anchr:`), and
+ * until 2026-09-11 it was silently ignored, indistinguishable from a field
+ * deliberately parked. `parseHelpContent` reports every such line in
+ * `HelpContent.problems`, and the content test fails on any.
+ */
+const ENTRY_FIELDS = new Set([
+  'title', 'description', 'interactions', 'shortcut', 'context', 'anchor',
+  'spotlight', 'action', 'once', 'change', 'only', 'highlight', 'width',
+  'position', 'offsetx', 'tour', 'beats',
+]);
+const BEAT_FIELDS = new Set([
+  'description', 'anchor', 'spotlight', 'action', 'change', 'only',
+  'highlight', 'width', 'position', 'offsetx', 'keep',
+]);
+const SECTION_FIELDS = new Set(['tourmetadata', 'tourabbr', 'description']);
+
+/** Report every margin-level field line in `lines` whose name is not known. */
+function checkFieldNames(lines: string[], known: Set<string>, where: string, problems: string[]): void {
+  for (const line of lines) {
+    if (!isEntryField(line)) continue;
+    const f = fieldOf(line)!;
+    if (!f.parked && !known.has(f.name)) {
+      problems.push(`${where}: unknown field "${f.name}" (a misspelling? to park a field, strike it through: ~~${f.name}:~~)`);
+    }
+  }
+}
+
+/**
+ * Is this line an ENTRY-level field — one that ends whatever block is open?
+ *
+ * Decided by INDENT, not by the bold markers: an entry's fields sit at the
+ * margin, while a block's continuation lines, a beat's own fields and a prose
+ * bullet inside a description are all indented. `- **` was the test until the
+ * markers became optional, at which point an unbolded `- Beats:` straight
+ * after a `Description:` was swallowed into it and rendered as prose
+ * (Siggie, 2026-09-10, from a screenshot). Every block extractor shares this
+ * one rule so the same line cannot end one kind of block and not another.
+ */
+function isEntryField(line: string): boolean {
+  return line.length > 0 && !/^\s/.test(line) && fieldOf(line) !== undefined;
+}
+
+
+/**
+ * Extract a field as a multi-line MARKDOWN BLOCK: the text after the colon,
+ * plus every following line up to the next entry-level `- **Field:**`.
+ *
+ * **Why this exists.** `extractField` stops at the end of its own line, so an
+ * authored `Description:` was one paragraph with no bullets, no line breaks and
+ * no second paragraph — Siggie's "the format really does not capture my
+ * intent": a draft written as one flowing block had to be split across
+ * `Description:` / `Context:` / `Interactions:`, which reordered it. A field
+ * read as a block can hold the draft as written.
+ *
+ * Continuation lines are DEDENTED by the common indent of the block, because
+ * markdown reads four leading spaces as a code fence — the authored indent is
+ * there to show the lines belong to the field, and must not survive into the
+ * markdown.
+ */
+function extractBlockField(lines: string[], label: string): string | undefined {
+  const key = label.toLowerCase();
+  const idx = lines.findIndex(l => liveName(l) === key);
+  if (idx === -1) return undefined;
+
+  const first = fieldOf(lines[idx])!.value;
+  const rest: string[] = [];
+  for (let i = idx + 1; i < lines.length; i++) {
+    // Any entry-level field ends the block. A blank line does NOT: a field can
+    // hold two paragraphs, and stopping at the blank would silently drop the
+    // second.
+    if (isEntryField(lines[i])) break;
+    // So does the structural markup around a section. `## Section` blocks are
+    // wrapped in `<details>` so the file folds when read on GitHub, which puts
+    // a `</details>` after the LAST entry of each section -- inside that
+    // entry's block, since nothing else ends it. Without this the closing tag
+    // is swallowed into the description and rendered as literal text in the
+    // popover.
+    if (SECTION_MARKUP.test(lines[i].trim())) break;
+    rest.push(lines[i]);
+  }
+  // Trailing blanks are the gap before the next field, not part of the value.
+  while (rest.length && rest[rest.length - 1].trim() === '') rest.pop();
+  if (rest.length === 0) return first;
+
+  const indents = rest.filter(l => l.trim() !== '')
+    .map(l => l.length - l.trimStart().length);
+  const dedent = Math.min(...indents);
+  const body = rest.map(l => l.slice(dedent)).join('\n');
+  // The first line is already dedented (it followed the colon), so it joins
+  // the block at column 0 whatever the continuation's indent was.
+  return first ? `${first}\n${body}` : body;
+}
+
+/** Extract bullet list items under a field header like "- **Interactions:**" */
+function extractBulletList(lines: string[], label: string): string[] {
+  const key = label.toLowerCase();
+  const headerIdx = lines.findIndex(l => liveName(l) === key);
+  if (headerIdx === -1) return [];
+
+  const results: string[] = [];
+  for (let i = headerIdx + 1; i < lines.length; i++) {
+    const trimmed = lines[i].trimStart();
+    // Stop at the next entry-level field or a blank line.
+    if (isEntryField(lines[i]) || trimmed === '') break;
+    if (trimmed.startsWith('- ')) {
+      results.push(trimmed.slice(2).trim());
+    }
+  }
+  return results;
+}
+
+/**
+ * Parse the `- **Beats:**` block: an ordered list, each item optionally
+ * followed by indented `- Field: value` lines.
+ *
+ * Beat fields follow the same spelling rules as entry fields (`fieldOf`):
+ * bold optional, case-insensitive. What tells a beat's fields apart from the
+ * entry fields after the block is indent alone — see `isEntryField`. Until
+ * 2026-09-10 a beat's `- **Description:**` was silently ignored because this
+ * reader matched the plain form only.
+ */
+function extractBeats(lines: string[], entryId: string, problems: string[]): TourBeat[] | undefined {
+  // `- Beats:` and `- **Beats:**` both open the block; see `fieldOf`. A
+  // parked `~~Beats:~~` opens nothing, so its beats drop out with it.
+  const headerIdx = lines.findIndex(l => liveName(l) === 'beats');
+  if (headerIdx === -1) return undefined;
+
+  const beats: TourBeat[] = [];
+  let current: TourBeat | null = null;
+  const push = () => { if (current) beats.push(current); };
+
+  for (let i = headerIdx + 1; i < lines.length; i++) {
+    const trimmed = lines[i].trimStart();
+    // An entry-level field ends the block; blank lines are allowed inside it.
+    if (isEntryField(lines[i])) break;
+    /*
+     * Raw HTML at the margin ends the block too. `help-content.md` wraps its
+     * tours in `<details>`/`<div>` for readability in an editor, and those
+     * closing tags sit after the last beat with nothing between them — so
+     * without this they were swallowed as that beat's prose and rendered as
+     * literal `</details> </div>` in the popover.
+     */
+    if (lines[i].length > 0 && !/^\s/.test(lines[i]) && /^<\/?[a-z]/i.test(trimmed)) break;
+    if (trimmed === '') continue;
+
+    const numbered = trimmed.match(/^(\d+)\.\s+(.*)$/);
+    if (numbered) {
+      push();
+      current = { text: numbered[2].trim() };
+      continue;
+    }
+
+    // `- Field: value` attached to the beat above it, bold or not. A parked
+    // one is skipped; an unknown one is reported.
+    const field = fieldOf(trimmed);
+    if (field?.parked) continue;
+    if (field && current) {
+      const { name: key, value } = field;
+      if (!BEAT_FIELDS.has(key)) {
+        problems.push(`${entryId} beat ${beats.length + 1}: unknown field "${key}" (a misspelling? to park a field, strike it through: ~~${key}:~~)`);
+        continue;
+      }
+      /*
+       * `Description:` is the beat's viewer-facing prose, and the ONLY field
+       * here that runs to more than one line — a beat used to be its numbered
+       * line and nothing else, so it could not hold a paragraph or a list.
+       * Continuation is by indent, like the entry-level block fields: every
+       * following line indented deeper than this `-` belongs to it.
+       */
+      if (key === 'description') {
+        const bulletIndent = lines[i].length - lines[i].trimStart().length;
+        const body: string[] = [];
+        let j = i + 1;
+        for (; j < lines.length; j++) {
+          if (lines[j].trim() === '') { body.push(''); continue; }
+          const ind = lines[j].length - lines[j].trimStart().length;
+          if (ind <= bulletIndent) break;
+          body.push(lines[j]);
+        }
+        while (body.length && body[body.length - 1].trim() === '') body.pop();
+        if (body.length) {
+          const indents = body.filter(l => l.trim() !== '')
+            .map(l => l.length - l.trimStart().length);
+          const dedent = Math.min(...indents);
+          const rest = body.map(l => l.slice(dedent)).join('\n');
+          current.description = value ? `${value}\n${rest}` : rest;
+        } else {
+          current.description = value;
+        }
+        i = j - 1;
+        continue;
+      }
+      if (key === 'anchor') current.anchor = parseAnchor(value, entryId);
+      else if (key === 'spotlight') current.spotlight = parseSpotlight(value, entryId);
+      else if (key === 'action') current.action = value.trim();
+      else if (key === 'change') current.change = value.trim();
+      // `Only:` is `Change:` with the replace flag set. Both write the same
+      // field, so a beat declaring both keeps whichever came last rather than
+      // pushing two frames.
+      else if (key === 'only') { current.change = value.trim(); current.replace = true; }
+      else if (key === 'highlight') current.highlight = parseHighlight(value);
+      else if (key === 'width') current.width = parseWidth(value);
+      else if (key === 'position') current.position = parsePosition(value);
+      else if (key === 'offsetx') current.offsetX = parseOffset(value);
+      // `- Keep: true`. A bare `- Keep:` counts too: it is a marker, and an
+      // author who writes it without a value plainly means it.
+      else if (key === 'keep') current.keep = value.trim() !== 'false';
+      continue;
+    }
+
+    // A plain continuation line wraps the beat's text.
+    if (current && !trimmed.startsWith('-')) {
+      current.text = `${current.text} ${trimmed}`.trim();
+    }
+  }
+  push();
+
+  return beats.length > 0 ? beats : undefined;
+}
+
+function parseEntry(block: string, order: number, problems: string[]): HelpEntry | null {
+  const lines = block.split('\n');
+  const headerLine = lines[0];
+  const match = headerLine.match(/^###\s+(.+)$/);
+  if (!match) return null;
+
+  const id = match[1].trim();
+  checkFieldNames(lines, ENTRY_FIELDS, id, problems);
+  const title = extractField(lines, 'Title') ?? id;
+  // Description is the one field read as a multi-line block, so a step can
+  // hold the prose as drafted. The rest stay single-line by design — see
+  // `extractBlockField`.
+  const description = extractBlockField(lines, 'Description') ?? '';
+  const interactions = extractBulletList(lines, 'Interactions');
+  const shortcut = extractField(lines, 'Shortcut');
+  const context = extractField(lines, 'Context');
+  const anchor = parseAnchor(extractField(lines, 'Anchor'), id);
+  const spotlight = parseSpotlight(extractField(lines, 'Spotlight'), id);
+  const action = extractField(lines, 'Action');
+  const once = extractField(lines, 'Once');
+  /*
+   * `Only:` is `Change:` carrying a replace flag, so the two share one field.
+   * `Change:` wins when both are written: an empty `Change:` is meaningful
+   * (push an empty frame), so "which did the author write" cannot be decided
+   * by truthiness — only by which field is PRESENT.
+   */
+  const onlyRaw = extractField(lines, 'Only');
+  const changeRaw = extractField(lines, 'Change');
+  const change = changeRaw ?? onlyRaw;
+  const replace = changeRaw === undefined && onlyRaw !== undefined ? true : undefined;
+  const highlight = parseHighlight(extractField(lines, 'Highlight'));
+  const width = parseWidth(extractField(lines, 'Width'));
+  const position = parsePosition(extractField(lines, 'Position'));
+  const offsetX = parseOffset(extractField(lines, 'OffsetX'));
+  const beats = extractBeats(lines, id, problems);
+  const tourRaw = extractField(lines, 'Tour');
+  // `Tour:` names a tour; a bare `- **Tour:**` with no value joins the default
+  // one, so a file with a single tour never has to write its name. A parked
+  // `~~Tour:~~` does not match at all and leaves this undefined, which is what
+  // drops the entry out of the tour while keeping it as help.
+  const tour = tourRaw === undefined ? undefined : (tourRaw || DEFAULT_TOUR);
+
+  return {
+    id, title, description, interactions, shortcut, context,
+    anchor, action, once, change, replace, highlight, width, position, offsetX, tour, order, beats,
+    ...(spotlight ? { spotlight } : {}),
+  };
+}
+
+/**
+ * @param nextOrder  running file-order counter; the tour is ordered by it, so
+ *                   it has to keep counting ACROSS sections rather than
+ *                   restarting per block.
+ */
+function parseSection(block: string, nextOrder: () => number, problems: string[]): HelpSection {
+  const lines = block.split('\n');
+  // FIND the heading rather than assuming line 0. Each section is wrapped in
+  // `<details>`/`<summary>` so the file folds on GitHub, which puts two lines
+  // above the `## `. Reading line 0 gave every section the title 'Unknown' and
+  // swallowed the wrapper into `body`.
+  const headerIdx = lines.findIndex(l => /^##\s+/.test(l));
+  const titleMatch = headerIdx === -1 ? null : lines[headerIdx].match(/^##\s+(.+)$/);
+  const title = titleMatch ? titleMatch[1].trim() : 'Unknown';
+  const id = title.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+
+  // Body = everything between the ## header and the first ### entry
+  const bodyLines: string[] = [];
+  for (let i = headerIdx + 1; i < lines.length; i++) {
+    if (lines[i].startsWith('### ')) break;
+    // The wrapper's own markup is not section prose.
+    if (SECTION_MARKUP.test(lines[i].trim())) continue;
+    bodyLines.push(lines[i]);
+  }
+  const body = bodyLines.join('\n').trim();
+
+  /*
+   * A section whose body names a tour describes that tour, for the chooser.
+   * Reuses the entry field readers on the body's lines: the syntax is the same
+   * `- **Field:** value`, so a section's metadata is authored exactly like an
+   * entry's fields rather than in a second spelling.
+   *
+   * `Description:` is read as a BLOCK, so a tour description can run to a
+   * paragraph the way a step's can.
+   */
+  checkFieldNames(bodyLines, SECTION_FIELDS, `section "${title}"`, problems);
+  const declared = extractField(bodyLines, 'TourMetadata');
+  const tourMeta: TourMeta | undefined = declared === undefined
+    ? undefined
+    // A BARE `- **TourMetadata:**` takes the section's `## ` heading as the
+    // tour name. The name would otherwise be written three times per tour --
+    // `<summary>`, `## heading`, `TourMetadata:` -- all of which have to agree,
+    // with only the first two checked. Omitting the value removes the copy
+    // that nothing else pins.
+    : {
+      name: declared || title,
+      description: extractBlockField(bodyLines, 'Description')?.trim() ?? '',
+      abbr: extractField(bodyLines, 'TourAbbr')?.trim() || undefined,
+    };
+
+  // Split remaining into ### entry blocks
+  const entries: HelpEntry[] = [];
+  const entryBlocks = block.split(/(?=^### )/m);
+  for (const entryBlock of entryBlocks) {
+    if (!entryBlock.startsWith('### ')) continue;
+    const entry = parseEntry(entryBlock.trim(), nextOrder(), problems);
+    if (entry) entries.push(entry);
+  }
+
+  return { id, title, body, entries, tourMeta };
+}
+
+/**
+ * Every tour named in the file, in the order their first step appears.
+ * One tour is the normal case; the list exists so a second one can be offered
+ * without the host hardcoding its name.
+ */
+export function tourNames(content: HelpContent): string[] {
+  const seen = new Set<string>();
+  for (const e of [...content.entries.values()].sort((a, b) => a.order - b.order)) {
+    if (e.tour) seen.add(e.tour);
+  }
+  return [...seen];
+}
+
+/**
+ * A tour's name as it travels in a URL: lowercase, non-alphanumerics collapsed
+ * to `-`. "Using the Explorer" -> `using-the-explorer`.
+ *
+ * DERIVED rather than authored, so there is no third spelling of a tour name
+ * to keep in agreement (the section heading and `TourMetadata:` are already
+ * two, and `parseSection` collapses those with a bare `TourMetadata:`).
+ *
+ * The cost of deriving: renaming a tour's heading silently invalidates links
+ * to it. `tourBySlug` answers `undefined` in that case, and the caller falls
+ * back to the first tour rather than guessing at a near match -- a stale link
+ * should land somewhere predictable, not somewhere that looks intended. If
+ * tour names start churning, the fix is an authored `TourSlug:` field, not
+ * fuzzy matching.
+ */
+export function tourSlug(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+}
+
+/**
+ * The tour a slug names, or `undefined` if none matches.
+ *
+ * Compares slug to slug rather than trying to reverse the slugify, which is
+ * not invertible. Linear over five tours.
+ */
+export function tourBySlug(content: HelpContent, slug: string): string | undefined {
+  const want = tourSlug(slug);
+  return tourNames(content).find(n => tourSlug(n) === want);
+}
+
+/**
+ * Steps of one tour, in FILE ORDER. Entries with no `Tour:` field are
+ * help-only.
+ *
+ * Ordering by file position rather than an authored number is what makes
+ * inserting a step a paste rather than a renumber, and what makes a gap or a
+ * duplicate impossible to write.
+ */
+export function tourSteps(content: HelpContent, tour?: string): HelpEntry[] {
+  const name = tour ?? tourNames(content)[0];
+  return [...content.entries.values()]
+    .filter(e => e.tour !== undefined && e.tour === name)
+    .sort((a, b) => a.order - b.order);
+}
+
+/**
+ * Every navigable position in the tour, in order: each step expanded into its
+ * beats, a beatless step contributing exactly one position.
+ *
+ * This is the seam with the tour mechanism -- it navigates this flat list and
+ * never has to know beats are nested. `back` is `positions[i - 1]`, reached by
+ * popping the `change` the position being LEFT pushed, so the two directions
+ * are inverses rather than both being an absolute apply.
+ */
+/**
+ * A position's address: the entry slug, plus `\u25b8N` for the Nth beat.
+ *
+ * `beatIndex` is -1 at a step's OPENING position, which addresses as the bare
+ * slug -- the opening is the step's own text, so the step's own id names it.
+ * Beats are 1-based here to match the ordered list they are authored as.
+ */
+function addressOf(entryId: string, beatIndex: number): string {
+  return beatIndex < 0 ? entryId : `${entryId} \u25b8${beatIndex + 1}`;
+}
+
+/**
+ * The same address, spelled for a machine: `rows-and-dots` or
+ * `rows-and-dots~4`. Rendered as `data-step-address` on every popover, in
+ * EVERY build.
+ *
+ * Separate from `addressOf` because the readers differ: that one feeds the
+ * visible tag, which is dev-only.
+ * This one is ungated, so `e2e/placement.spec.ts` can navigate by it in a
+ * production build, and ASCII, so there is no `\u25b8` to paste into a
+ * selector.
+ *
+ * Derived from the same `entryId`/`beatIndex` rather than being a second
+ * string so the two renderings cannot drift apart.
+ */
+export function stepAddressOf(entryId: string, beatIndex: number): string {
+  return beatIndex < 0 ? entryId : `${entryId}~${beatIndex + 1}`;
+}
+
+/**
+ * The markdown header that declares an entry, which is what the address tag
+ * copies: a string that finds exactly one line in the content file.
+ */
+function searchForEntry(entryId: string): string {
+  return `### ${entryId}`;
+}
+
+export function tourPositions(content: HelpContent, tour?: string): TourPosition[] {
+  const positions: TourPosition[] = [];
+  tourSteps(content, tour).forEach((entry, i) => {
+    // The step number is the entry's rank in this tour, not a field on it.
+    const step = i + 1;
+    if (!entry.beats || entry.beats.length === 0) {
+      positions.push({
+        entry, step, beatIndex: 0, beatCount: 0,
+        address: addressOf(entry.id, -1),
+        searchFor: searchForEntry(entry.id),
+        blocks: [entry.description],
+        text: entry.description,
+        anchor: entry.anchor,
+        ...(entry.spotlight ? { spotlight: entry.spotlight } : {}),
+        action: entry.action,
+        change: entry.change,
+        replace: entry.replace,
+        highlight: entry.highlight,
+        width: entry.width,
+        position: entry.position,
+        offsetX: entry.offsetX,
+      });
+      return;
+    }
+    /*
+     * The step's own text IS the first beat, and beats ADD to what is showing
+     * rather than replacing it (Siggie, 2026-08-28: "the stuff outside the
+     * Beats section is actually the first beat / by default, the beat text is
+     * additive on top of that").
+     *
+     * The old model replaced the body with each beat's text, which forced the
+     * author to repeat the description in beat one to avoid it vanishing --
+     * `relationship-kinds` does exactly that, and the note beside it asks
+     * whether the repetition "reads as a stutter". Under this model it is not
+     * a stutter to fix, it is a beat to delete.
+     */
+    let showing = entry.description ? [entry.description] : [];
+
+    /*
+     * THE OPENING POSITION: the step's own text, alone, before any beat has
+     * revealed. If the description is beat one then it needs a position of its
+     * own -- without one the step opens on description+beat-1 together and the
+     * setup can never be read by itself, which is the bug Siggie caught in the
+     * `selection-tree` screenshot ("the popover starts on Beat 1, it should
+     * start on the stuff before Beat 1").
+     *
+     * `beatIndex: -1` marks it: it is not one of the authored beats, and the
+     * counter shows a bare `2 / 6` there while the beats add reveal dots.
+     */
+    if (showing.length > 0) {
+      positions.push({
+        entry, step, beatIndex: -1, beatCount: entry.beats!.length,
+        address: addressOf(entry.id, -1),
+        searchFor: searchForEntry(entry.id),
+        blocks: showing,
+        text: showing.join('\n\n'),
+        anchor: entry.anchor,
+        ...(entry.spotlight ? { spotlight: entry.spotlight } : {}),
+        action: entry.action,
+        // The step's own change belongs to the position that opens it.
+        change: entry.change,
+        replace: entry.replace,
+        highlight: entry.highlight,
+        width: entry.width,
+        position: entry.position,
+        offsetX: entry.offsetX,
+      });
+    }
+
+    /*
+     * `Width:` is STICKY across beats (Siggie, 2026-09-08): a beat that sets it
+     * governs every later beat until another one changes it, rather than each
+     * beat falling back to the step's width.
+     *
+     * The reasoning is that a width is a property of the PICTURE a run of beats
+     * is building, not of one popover — a step that narrows to show a checkbox
+     * and then keeps narrating that checkbox should not snap back to 800 on the
+     * next beat. Only `Width:` is sticky; `Anchor:`, `Position:` and `OffsetX:`
+     * still inherit from the step, because those say WHERE this one popover
+     * goes and a stale one strands it away from what it points at.
+     */
+    let stickyWidth = entry.width;
+
+    entry.beats.forEach((beat, beatIndex) => {
+      // A beat REPLACES what is showing unless it asks to `Keep:` it.
+      /*
+       * The DESCRIPTION is what renders; the numbered line is a label and is
+       * never shown.
+       *
+       * No fallback to the label: a beat with no `Description:` renders NO
+       * text, which is a shape worth having (Siggie, 2026-09-08) — a beat that
+       * only moves the anchor or pushes a `Change:` is a real thing to author,
+       * and a fallback would leak the label to the viewer with no way to
+       * suppress it. An empty block is filtered out downstream, so such a beat
+       * shows its title and whatever the previous beat kept.
+       */
+      const shown = beat.description ?? '';
+      showing = beat.keep ? [...showing, shown] : [shown];
+      if (beat.width !== undefined) stickyWidth = beat.width;
+      positions.push({
+        entry, step, beatIndex, beat, beatCount: entry.beats!.length,
+        address: addressOf(entry.id, beatIndex),
+        searchFor: searchForEntry(entry.id),
+        blocks: showing,
+        text: showing.join('\n\n'),
+        anchor: beat.anchor ?? entry.anchor,
+        ...((beat.spotlight ?? entry.spotlight)
+          ? { spotlight: (beat.spotlight ?? entry.spotlight)! } : {}),
+        action: beat.action,
+        // Inherited like `anchor`: a beat that does not move the popover keeps
+        // the step's placement rather than snapping back to automatic.
+        highlight: beat.highlight ?? entry.highlight,
+        width: stickyWidth,
+        position: beat.position ?? entry.position,
+        offsetX: beat.offsetX ?? entry.offsetX,
+        /*
+         * A beat inherits the step's anchor and action, but NOT its `change`
+         * or `action`: the OPENING position above owns both, and a beat pushes
+         * only a `change` it declares itself.
+         *
+         * Under absolute state every beat re-applied the step's full query,
+         * which was harmless because re-applying the same absolute state is
+         * idempotent. Pushing the same delta once per beat is NOT — a
+         * four-beat step would push four frames and `back` would crawl out of
+         * them one useless pop at a time. Since 2026-08-28 the step opens on
+         * its own position, so that is where its change belongs; letting beat
+         * 0 also push it would double-count the very thing this guards.
+         */
+        change: beat.change,
+        replace: beat.replace,
+      });
+    });
+  });
+  return positions;
+}
+
+/**
+ * The POSITION index that opens step `step` (1-based), for a caller that has a
+ * step number and needs the index `startTour`/`goToStep` take.
+ *
+ * The two are not the same number once a step has beats: `tourPositions`
+ * expands each step into its beats, so step 3 of a tour whose first two steps
+ * have four beats each is position 10. Everything that navigates works in
+ * positions; everything a reader SEES -- the `n / N` counter, the map's step
+ * column, a `?step=` link -- is a step number. This is the one conversion
+ * between them.
+ *
+ * Returns the step's FIRST position, which is its opening (the state before
+ * any beat is revealed), matching what the map's rows point at.
+ *
+ * `undefined` when no such step exists, leaving "what should a bad step number
+ * do" to the caller rather than silently clamping here.
+ */
+export function positionOfStep(
+  content: HelpContent, tour: string | undefined, step: number,
+): number | undefined {
+  const i = tourPositions(content, tour).findIndex(p => p.step === step);
+  return i === -1 ? undefined : i;
+}
+
+export function parseHelpContent(markdown: string): HelpContent {
+  // Remove the HTML comment blocks (the format spec at the top, and the
+  // TODO(siggie) notes left beside entries during translation).
+  const cleaned = markdown.replace(/<!--[\s\S]*?-->/g, '').trim();
+
+  /*
+   * Sections are split on their own `## ` heading, the way entries split on
+   * `### ` — the heading IS the boundary.
+   *
+   * It used to split on `^---$`, so a `## ` heading with no separator above it
+   * was absorbed into the section before it. Nothing failed loudly: its entries
+   * still parsed and their tours still appeared (tours come from each entry's
+   * `Tour:` field, not from sections), but the section's own `TourMetadata:`
+   * description was silently dropped, so a tour lost its subtitle in the
+   * chooser. The tour now called `Using the Explorer` was in exactly that
+   * state (2026-09-08).
+   *
+   * A separator is invisible in rendered markdown and easy to leave out, and
+   * the failure was cosmetic enough to survive review. The heading cannot be
+   * left out — it is the thing being written — so this makes that class of bug
+   * impossible rather than catchable. `---` is now decorative everywhere.
+   */
+  const sectionBlocks = cleaned.split(/(?=^## )/m).map(b => b.trim()).filter(Boolean);
+
+  const sections: HelpSection[] = [];
+  const entries = new Map<string, HelpEntry>();
+  const problems: string[] = [];
+  // File order, counted across sections — it is what orders the tour.
+  let order = 0;
+
+  for (const block of sectionBlocks) {
+    // Skip blocks that don't start with ## (e.g., the # title)
+    if (!block.match(/^## /m)) continue;
+    // Skip prose sections: their ### sub-headings are documentation and notes,
+    // not entries.
+    const heading = block.match(/^##\s+(.+)$/m)?.[1].trim();
+    if (heading && PROSE_SECTIONS.has(heading)) continue;
+
+    const section = parseSection(block, () => order++, problems);
+    sections.push(section);
+    for (const entry of section.entries) {
+      entries.set(entry.id, entry);
+    }
+  }
+
+  // Tour descriptions, gathered across sections and keyed by the tour they
+  // name — so a chooser looks a tour up by name rather than walking sections.
+  const tourMeta = new Map<string, TourMeta>();
+  for (const section of sections) {
+    if (section.tourMeta) tourMeta.set(section.tourMeta.name, section.tourMeta);
+  }
+
+  // Loud in the console while authoring, red in the content test.
+  if (problems.length) console.warn(`[help-content] ${problems.length} problem(s):\n  ${problems.join('\n  ')}`);
+
+  return { sections, entries, tourMeta, problems };
+}
+
+/**
+ * Fills a `{{kind:arg}}` placeholder with text the HOST looks up.
+ *
+ * Returning `undefined` means "I do not handle this kind" and leaves the
+ * placeholder standing, visibly, in the popover — see `fillPlaceholders`.
+ */
+export type TextResolver = (arg: string) => string | undefined;
+
+/**
+ * `{{kind:arg}}`. The arg runs to the closing brace, so it may contain dots
+ * and colons (`{{model-description:Participant}}`, and a hypothetical
+ * `{{slot-description:Visit.associated_participant}}` alike); only the FIRST
+ * colon separates kind from arg. Whitespace inside the braces is tolerated
+ * because it is invisible in a markdown file and would otherwise fail
+ * mysteriously.
+ *
+ * **The arg is optional**, so a resolver that needs none is written `{{loop}}`
+ * rather than `{{loop:}}`; it receives `''`. A resolver that requires an arg
+ * is unaffected — it returns `undefined` for `''` and the placeholder stays
+ * visible, exactly as for any other bad arg.
+ */
+const PLACEHOLDER = /\{\{\s*([a-z][a-z0-9-]*)\s*(?::\s*([^}]*?)\s*)?\}\}/gi;
+
+/**
+ * Substitute `{{kind:arg}}` placeholders in one markdown block.
+ *
+ * **Explicit, not implicit** (Siggie, 2026-09-08: "i prefer explicit"). The
+ * alternative considered was deriving the text from the step's `Anchor:` — a
+ * step anchored at `entity-row:Participant` silently gaining that class's
+ * description. Less to type, but the author cannot see in the file that the
+ * text comes from elsewhere, and a step with no anchor would have no rule.
+ * A placeholder says where the text came from, at the place it lands, and
+ * composes with authored prose around it — which the whole-field alternative
+ * could not do.
+ *
+ * **An unresolved placeholder is left as written**, deliberately, rather than
+ * being blanked. A class renamed by an upstream schema sync is exactly the
+ * failure this has to survive (the hand-curated config rot problem), and a
+ * silent empty popover hides it while a literal `{{model-description:Gone}}`
+ * on screen names the missing thing. A test can assert every placeholder in
+ * the content file resolves, which turns schema drift into a red test rather
+ * than a hole in a tour.
+ */
+export function fillPlaceholders(
+  block: string,
+  resolvers: Record<string, TextResolver> | undefined,
+): string {
+  if (!block.includes('{{')) return block;
+  /*
+   * `{{target:…}}` is handled here rather than by a resolver because it is not
+   * text: it annotates the LINK before it. Done ahead of the resolver pass,
+   * and ahead of the `!resolvers` bail-out, so it works in a host that
+   * registered none — it needs no host knowledge. See `linkTarget.ts` for why
+   * it cannot be a remark plugin.
+   */
+  const withTargets = applyLinkTargets(block);
+  if (!resolvers) return withTargets;
+  return withTargets.replace(PLACEHOLDER, (whole, kind: string, arg?: string) => {
+    const text = resolvers[kind.toLowerCase()]?.(arg ?? '');
+    return text ?? whole;
+  });
+}
+
+/**
+ * Every `{{kind:arg}}` in a block, as `[kind, arg]` pairs. For tests that want
+ * to assert the content file's placeholders all resolve against the live
+ * schema; not used by the rendering path.
+ */
+export function placeholdersIn(block: string): Array<[string, string]> {
+  return [...block.matchAll(PLACEHOLDER)].map(m => [m[1].toLowerCase(), m[2] ?? '']);
+}

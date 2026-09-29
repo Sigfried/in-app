@@ -1,0 +1,264 @@
+/**
+ * The `←─ N   M ─→` bar's two axes, pinned against the real schema.
+ *
+ * These exist because the two axes were conflated repeatedly while the bar was
+ * being designed (2026-09-04), in both directions, by both of us. They are
+ * genuinely independent and the confusion is cheap to re-introduce:
+ *
+ *   SIDE  — which way the class sits on the canvas. Layout is owner-first, so
+ *           everything that OWNS me is drawn to my left and everything I own
+ *           to my right. This is what the two chip counts split on.
+ *   KIND  — the edge's verdict, i.e. which end carries the arrowhead, i.e.
+ *           which class declares the slot. This is what each ROW's little
+ *           edge sample shows.
+ *
+ * The trap is assuming these are the same fact, which would make the row
+ * samples redundant with the heading. They are not: BOTH kinds appear on BOTH
+ * sides, and the tests below assert exactly that on real classes.
+ */
+
+import { describe, test, expect, beforeAll } from 'vitest';
+import { loadModelData } from '../utils/dataLoader';
+import { DataService } from '../services/DataService';
+import { collectRelations } from '../models/ownershipSubgraph';
+import { buildRelationRows } from '../explore/OwnershipGraphView';
+import type { RelationRowVM } from '../explore/RelationBar';
+import type { RelationPosition } from '../services/DataService';
+
+/** Mirrors POSITION_AXIS in RelationBar.tsx. Duplicated deliberately: if the
+ *  component's table is edited, this copy should have to be edited too. */
+const AXIS: Record<RelationPosition, { side: 'left' | 'right'; kind: string }> = {
+  'owned-mine': { side: 'left', kind: 'own-bkwd' },
+  'owned-theirs': { side: 'left', kind: 'own-fwd' },
+  'owns-mine': { side: 'right', kind: 'own-fwd' },
+  'owns-theirs': { side: 'right', kind: 'own-bkwd' },
+  'association': { side: 'left', kind: 'association' },
+};
+
+describe('relation bar axes', () => {
+  let rowsFor: (cls: string) => RelationRowVM[];
+
+  beforeAll(async () => {
+    const ds = new DataService(await loadModelData());
+    const all = collectRelations(ds.getContainmentGraph());
+    rowsFor = (cls: string) =>
+      buildRelationRows(all.get(cls) ?? [], () => false, id => id === cls);
+  });
+
+  const side = (rows: RelationRowVM[], s: 'left' | 'right') =>
+    rows.filter(r => AXIS[r.position].side === s);
+  const kindsOn = (rows: RelationRowVM[], s: 'left' | 'right') =>
+    new Set(side(rows, s).map(r => AXIS[r.position].kind));
+
+  test('the side is ownership: left = I belong to, right = I own', () => {
+    const rows = rowsFor('Observation');
+    const left = side(rows, 'left').map(r => r.other);
+    const right = side(rows, 'right').map(r => r.other);
+
+    // Observation belongs to these four: three because it points at them,
+    // one because ObservationSet collects it.
+    expect(new Set(left)).toEqual(
+      new Set(['Organization', 'Participant', 'Visit', 'ObservationSet']),
+    );
+    // And owns these, all by its own attributes.
+    expect(new Set(right)).toEqual(new Set(['Context', 'Entity', 'Quantity']));
+  });
+
+  test('BOTH edge kinds appear on the SAME side — the row glyph is not the heading', () => {
+    // The whole reason each row draws its own edge sample. On Observation's
+    // left, `ObservationSet.observations` is own-fwd while the other three
+    // are own-bkwd; a reader cannot infer either one from the side.
+    expect(kindsOn(rowsFor('Observation'), 'left'))
+      .toEqual(new Set(['own-bkwd', 'own-fwd']));
+
+    // And symmetrically on a right side: Person owns Participant (which
+    // points AT it via associated_person, own-bkwd) and CauseOfDeath (a value
+    // object it holds, own-fwd).
+    //
+    // This used to use SpecimenContainer's right side, which mixed kinds only
+    // because Specimen.contained_in was own-bkwd. That edge flipped forward
+    // 2026-09-11 (TASKS `drop-association`), so the container's right side is
+    // now uniformly own-fwd and no longer demonstrates anything. Person is the
+    // replacement, picked by sweeping the schema for a two-row mixed side.
+    expect(kindsOn(rowsFor('Person'), 'right'))
+      .toEqual(new Set(['own-bkwd', 'own-fwd']));
+  });
+
+  test('a row names the class that DECLARES the slot, which is not always the box', () => {
+    const left = side(rowsFor('Observation'), 'left');
+    const collected = left.find(r => r.other === 'ObservationSet');
+    // Declared on ObservationSet, not on Observation — so the popover must
+    // print the prefix rather than assume the box's own name.
+    expect(collected).toMatchObject({
+      declaredBy: 'ObservationSet',
+      slot: 'observations',
+      cardinality: '1..*',
+    });
+
+    const points = left.find(r => r.other === 'Participant');
+    expect(points).toMatchObject({
+      declaredBy: 'Observation',
+      slot: 'associated_participant',
+      cardinality: '1..1',
+    });
+  });
+
+  /*
+   * `association` has no live example since ASSOCIATION_SLOTS emptied
+   * 2026-09-11 (TASKS `drop-association`) — Specimen.related_document, the
+   * case this used to use, is now owns-mine and sits on the RIGHT.
+   *
+   * The axis entry is still asserted, from the table rather than from schema
+   * data, because the position remains a valid one and `POSITION_AXIS` must
+   * stay total over RelationPosition. This is the assertion that would catch
+   * someone deleting the association row while it is still the worked example
+   * proving an edge kind is expressible as configuration — see the acceptance
+   * criterion in `ownershipRules.ts` and `ownershipRules.test.ts`.
+   */
+  test('association still maps to the left: laid out target-first, like own-bkwd', () => {
+    expect(AXIS['association']).toEqual({ side: 'left', kind: 'association' });
+  });
+
+  test('the former association is now ownership, on the right', () => {
+    const right = side(rowsFor('Specimen'), 'right');
+    expect(right.find(r => r.other === 'Document')?.position).toBe('owns-mine');
+    expect(rowsFor('Specimen').some(r => r.position === 'association')).toBe(false);
+  });
+
+  test('self-loops are excluded — they render as ⟲ row markers, not relations', () => {
+    // Specimen.parent_specimen points at Specimen.
+    expect(rowsFor('Specimen').some(r => r.other === 'Specimen')).toBe(false);
+  });
+
+  test('the OWNER is the left-hand end on both sides — column order follows SIDE', () => {
+    /*
+     * The popover puts owner-left / owned-right, matching the canvas. That is
+     * decided by which side the popover is (left = the other class owns me),
+     * NOT by the edge's kind — keying it on kind was wrong for exactly the
+     * rows where the two disagree, e.g. `ObservationSet.observations`, which
+     * is own-fwd but sits under `← N` because ObservationSet owns Observation.
+     */
+    const left = side(rowsFor('Observation'), 'left');
+    const byOwnFwd = left.filter(r => AXIS[r.position].kind === 'own-fwd');
+    const byOwnBkwd = left.filter(r => AXIS[r.position].kind === 'own-bkwd');
+    // Both kinds really are present on this side, or the test proves nothing.
+    expect(byOwnFwd.length).toBeGreaterThan(0);
+    expect(byOwnBkwd.length).toBeGreaterThan(0);
+    // ...and every one of them names an owner of Observation, so all of them
+    // render with `other` on the LEFT and `this` on the right.
+    expect(byOwnFwd.map(r => r.other)).toContain('ObservationSet');
+  });
+
+  test('every position maps to a side and a kind', () => {
+    // A new RelationPosition must be placed deliberately, not defaulted.
+    const ds = new Set<string>();
+    for (const cls of ['Observation', 'Specimen', 'Participant', 'Visit']) {
+      for (const r of rowsFor(cls)) ds.add(r.position);
+    }
+    expect(ds.size).toBeGreaterThan(2);
+    for (const p of ds) expect(AXIS[p as RelationPosition]).toBeDefined();
+  });
+});
+
+/**
+ * Two kinds of derived attribute reach the bar, and they are NOT the same
+ * mechanism. Confusing them is what made TASKS `induced-clutter` name the
+ * wrong fix (2026-09-15), so both are pinned here with the case that
+ * distinguishes them.
+ *
+ *   inducedFrom   — OURS. containmentGraph Rule 3 retargets a forward-owned
+ *                   edge at each subclass of its RANGE. Nothing declares the
+ *                   slot; it is an inference about what may fill it.
+ *   inherited_from — LINKML's. `induced_class()` copies a parent's slot onto
+ *                   each subclass of the DECLARING class, so all of them do
+ *                   genuinely hold it.
+ */
+describe('derived attributes do not clutter the bar', () => {
+  let ds: DataService;
+  let all: ReturnType<typeof collectRelations>;
+
+  beforeAll(async () => {
+    ds = new DataService(await loadModelData());
+    all = collectRelations(ds.getContainmentGraph());
+  });
+
+  const parentOf = (id: string) => ds.getClassSummary(id)?.parentId;
+  const rowsOf = (members: string[], withParent = false) => {
+    const absorbed = new Set(members);
+    return buildRelationRows(
+      members.flatMap(m => all.get(m) ?? []),
+      () => false,
+      id => absorbed.has(id),
+      withParent ? parentOf : undefined,
+    );
+  };
+  const owns = (rows: RelationRowVM[]) =>
+    rows.filter(r => r.position === 'owns-mine' || r.position === 'owns-theirs');
+  const belongsTo = (rows: RelationRowVM[]) =>
+    rows.filter(r => !(r.position === 'owns-mine' || r.position === 'owns-theirs'));
+
+  test('Rule 3 induced edges are absent — one real attribute, not six', () => {
+    /*
+     * `QuestionnaireResponseItem.response_value: QuestionnaireResponseValue`
+     * is one slot. Rule 3 adds five more edges, one per value subclass, and
+     * the popover read "owns 6 distinct entities" off them (Siggie's
+     * screenshot, 2026-09-14). No subclass declares `response_value`.
+     */
+    const rows = owns(rowsOf(['QuestionnaireResponseItem']));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      other: 'QuestionnaireResponseValue',
+      declaredBy: 'QuestionnaireResponseItem',
+      slot: 'response_value',
+    });
+    // The edges still exist upstream — layering and drawing need them.
+    const induced = ds.getContainmentGraph().edges
+      .filter(e => e.inducedFrom !== undefined && e.source === 'QuestionnaireResponseItem');
+    expect(induced).toHaveLength(5);
+  });
+
+  test('a merged box collapses inherited repeats onto the declaring ancestor', () => {
+    /*
+     * `performed_by`, `associated_visit` and `associated_participant` are
+     * declared once, on ObservationSet; LinkML copies each onto the three
+     * subclasses. The merged box unions all four members, so the popover read
+     * "4 distinct entities through 13 attributes" over 4 real attributes.
+     */
+    const family = ['ObservationSet', 'DimensionalObservationSet',
+                    'MeasurementObservationSet', 'SdohObservationSet'];
+    const before = belongsTo(rowsOf(family));
+    expect(before).toHaveLength(13);
+
+    const after = belongsTo(rowsOf(family, true));
+    expect(after).toHaveLength(4);
+    // Every survivor is declared by the ancestor, never by a subclass...
+    expect(after.map(r => `${r.declaredBy}.${r.slot}`).sort()).toEqual([
+      'ObservationSet.associated_participant',
+      'ObservationSet.associated_visit',
+      'ObservationSet.performed_by',
+      'Specimen.dimensional_measures',
+    ]);
+    // ...and the entity count, which was already right, does not move.
+    expect(new Set(after.map(r => r.other)).size)
+      .toBe(new Set(before.map(r => r.other)).size);
+  });
+
+  test('a subclass that RE-declares a slot keeps its own row', () => {
+    /*
+     * The case that stops the collapse from being keyed on `inheritedFrom`.
+     * Each ObservationSet subclass narrows `observations` via slot_usage
+     * (DimensionalObservationSet.observations -> DimensionalObservation), so
+     * those rows state different facts and must all survive even though the
+     * slot NAME is shared with the ancestor's row.
+     */
+    const family = ['ObservationSet', 'DimensionalObservationSet',
+                    'MeasurementObservationSet', 'SdohObservationSet'];
+    const rows = owns(rowsOf(family, true))
+      .filter(r => r.slot === 'observations');
+    expect(rows).toHaveLength(4);
+    expect(new Set(rows.map(r => r.other))).toEqual(new Set([
+      'Observation', 'DimensionalObservation',
+      'MeasurementObservation', 'SdohObservation',
+    ]));
+  });
+});
