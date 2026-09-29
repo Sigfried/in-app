@@ -1,0 +1,247 @@
+-- ============================================================================
+-- TermHub demo — subset extraction → Parquet
+-- ============================================================================
+-- Produces the small Parquet bundle that DuckDB-Wasm loads in the browser.
+--
+-- DRIVER = the N3C "bundles" (N3C Recommended, drug classes, COVID, etc.) from
+-- data/bundle_cache.json, EXPANDED to include version history of each value set,
+-- then CAPPED to at most 3 versions per value set (the latest, the earliest, and
+-- one evenly-spaced middle) to keep the version UI uncluttered.
+--
+-- KEY INSIGHT: the dump already contains the derived tables materialized
+-- (all_csets, cset_members_items, concepts_with_counts). We FILTER them to the
+-- chosen codeset_ids — we do NOT re-run the original DDL. This preserves the N3C
+-- counts and the original researcher/author names automatically.
+--
+-- Measured sizes (see docs): bundle-only ~63 MB; bundle + capped versions is
+-- smaller still than the uncapped ~125 MB. Comfortably within browser budget.
+--
+-- Placeholders {{SRC}} (table-ref prefix), {{OUT}} (output dir),
+-- {{BUNDLE_JSON}} (path to bundle_cache.json) are substituted by build_subset.sh.
+-- ============================================================================
+
+-- ---------------------------------------------------------------------------
+-- 0a. Bundle codeset_ids — flatten data/bundle_cache.json
+--     Shape: { "bundles": { "<name>": { "codeset_ids": [..] }, ... } }
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE TEMP TABLE bundle_ids AS
+WITH raw AS (
+  SELECT unnest(json_keys(bundles)) AS bundle_name, bundles
+  FROM read_json_auto('{{BUNDLE_JSON}}')
+)
+SELECT DISTINCT
+  CAST(cid AS BIGINT) AS codeset_id,
+  bundle_name
+FROM raw,
+     UNNEST(CAST(json_extract(bundles, '$."' || bundle_name || '".codeset_ids') AS BIGINT[])) AS t(cid);
+
+-- NOTE (bundles as data, not as a build-time JSON import):
+--   Today the browser reads bundle membership straight from bundle_cache.json
+--   (imported into frontend/src/duckdb/queries.js and inlined at build). That's
+--   fine while bundles are a static, curated list. If bundles ever need to
+--   *evolve* — be edited, versioned, or derived in-app rather than fetched from
+--   the (now-removed) N3C bundle API — promote this `bundle_ids` table to its
+--   own output and query it in DuckDB alongside everything else:
+--     COPY (SELECT * FROM bundle_ids) TO '{{OUT}}/bundle_ids.parquet' (FORMAT parquet);
+--   then register 'bundle_ids' in frontend/src/duckdb/db.js TABLES and replace
+--   the bundle_cache.json import in queries.js with SQL over that table. Until
+--   there's a reason for bundles to change at runtime, the JSON import is
+--   simpler and needs no data rebuild.
+
+-- ---------------------------------------------------------------------------
+-- 0b. Expand to version history: every cset sharing a concept_set_name with a
+--     bundle cset. Drop 0-member drafts (no rows in cset_members_items).
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE TEMP TABLE bundle_names AS
+SELECT DISTINCT ac.concept_set_name
+FROM {{SRC}}all_csets ac
+JOIN bundle_ids b ON ac.codeset_id = b.codeset_id;
+
+CREATE OR REPLACE TEMP TABLE versioned AS
+SELECT ac.codeset_id,
+       ac.concept_set_name,
+       ac.codeset_created_at,
+       ac.version
+FROM {{SRC}}all_csets ac
+JOIN bundle_names bn ON ac.concept_set_name = bn.concept_set_name
+WHERE EXISTS (                       -- has at least one member/item (not a 0-member draft)
+  SELECT 1 FROM {{SRC}}cset_members_items m WHERE m.codeset_id = ac.codeset_id
+);
+
+-- ---------------------------------------------------------------------------
+-- 0c. Version cap: keep at most {{MAX_VERSIONS}} (default 3) per value set —
+--     always the earliest and latest (lineage endpoints), plus evenly-spaced
+--     middles. Order chronologically by codeset_created_at (fully populated;
+--     `version` is null for ~40% of csets so it can't be the sort key).
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE TEMP TABLE ranked AS
+SELECT *,
+       ROW_NUMBER() OVER (PARTITION BY concept_set_name ORDER BY codeset_created_at)        AS rn_asc,
+       COUNT(*)     OVER (PARTITION BY concept_set_name)                                    AS n_ver
+FROM versioned;
+
+CREATE OR REPLACE TEMP TABLE demo_codesets AS
+SELECT codeset_id
+FROM ranked
+WHERE n_ver <= {{MAX_VERSIONS}}                    -- keep all if within cap
+   OR rn_asc = 1                                    -- earliest (anchor)
+   OR rn_asc = n_ver                                -- latest (anchor)
+   -- evenly-spaced interior picks filling the remaining (MAX_VERSIONS-2) slots:
+   OR rn_asc IN (
+        SELECT CAST(round(k * (n_ver - 1.0) / ({{MAX_VERSIONS}} - 1)) AS BIGINT) + 1
+        FROM range(1, {{MAX_VERSIONS}} - 1) AS g(k)
+      )
+UNION
+-- ALWAYS keep every codeset_id a bundle explicitly points to, even if the
+-- version cap above would prune it. A bundle names a *specific* version id; if
+-- that exact id were dropped the bundle report would silently substitute (or
+-- omit) it. The cap still applies to the *other* versions of the same value
+-- set, so this only adds the handful of bundle-referenced interior versions.
+-- Restrict to versioned (i.e. has ≥1 member) so a 0-member draft id slipping
+-- into a bundle can't reintroduce an empty cset.
+SELECT codeset_id FROM bundle_ids
+WHERE codeset_id IN (SELECT codeset_id FROM versioned);
+
+-- ---------------------------------------------------------------------------
+-- 1. csets metadata  → all_csets.parquet  (drives select list + cards)
+--    Carries N3C counts + container_creator/codeset_creator (original authors).
+--    Drop atlas_json — large and not needed for the read-only views.
+-- ---------------------------------------------------------------------------
+COPY (
+  -- version is stored as double only because ~646 rows are NULL; all non-null
+  -- values are integer-valued, so cast to INT (NULLs preserved).
+  SELECT * EXCLUDE (atlas_json) REPLACE (CAST(version AS INTEGER) AS version)
+  FROM {{SRC}}all_csets
+  WHERE codeset_id IN (SELECT codeset_id FROM demo_codesets)
+) TO '{{OUT}}/all_csets.parquet' (FORMAT parquet);
+
+-- ---------------------------------------------------------------------------
+-- 2. members + items → cset_members_items.parquet  (the comparison grid)
+-- ---------------------------------------------------------------------------
+COPY (
+  SELECT *
+  FROM {{SRC}}cset_members_items
+  WHERE codeset_id IN (SELECT codeset_id FROM demo_codesets)
+) TO '{{OUT}}/cset_members_items.parquet' (FORMAT parquet);
+
+-- Seed set: every concept referenced as a member/item of a kept cset.
+CREATE OR REPLACE TEMP TABLE seed_concepts AS
+SELECT DISTINCT concept_id
+FROM {{SRC}}cset_members_items
+WHERE codeset_id IN (SELECT codeset_id FROM demo_codesets);
+
+-- ---------------------------------------------------------------------------
+-- 2b. CONCEPT UNIVERSE = seed concepts + their DESCENDANTS.
+--     TermHub deliberately surfaces each cset concept's descendants so users
+--     can see and add them while authoring (the original concept-graph endpoint
+--     pulled successors). We expand via concept_ancestor.
+--
+--     {{MAX_DEPTH}} controls expansion (substituted by build_subset.sh):
+--       0  = FULL transitive closure (all descendants, any depth)
+--       N  = descendants down to N levels (min_levels_of_separation <= N)
+--     WARNING: depth 0 over high-level concepts can explode (concept_ancestor
+--     is the bulk of the 30 GB dump). Measure with the report below; if too big
+--     re-run with a bounded MAX_DEPTH.
+--
+--     {{HIDE_VOCABS}} = comma-separated quoted vocab list to EXCLUDE from
+--     descendant expansion (default 'RxNorm Extension'). The data is US-only and
+--     TermHub hides these vocabs by default, so their descendant trees are dead
+--     weight (~490K RxNorm Extension concepts with near-zero usage). Concepts
+--     that are actual cset MEMBERS are always kept regardless (they're in
+--     seed_concepts); only their hidden-vocab DESCENDANTS are dropped. Pass an
+--     empty/non-matching list to disable.
+--
+--     {{COMPLETE_VOCABS}} = comma-separated quoted vocab list to COMPLETE: pull
+--     in ALL used (total_cnt > 0) concepts of these vocabs, even if not reached
+--     by cset membership or descent. These are vocabs cset authors browse/search
+--     (labs, oncology, procedures) where we only had the top slice. 'total_cnt>0'
+--     drops the dead long tail while keeping rare-but-real concepts. Pass an
+--     empty/non-matching list to disable.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE TEMP TABLE concept_universe AS
+SELECT concept_id FROM seed_concepts        -- members always kept, any vocab
+UNION
+SELECT DISTINCT ca.descendant_concept_id    -- descendants (minus hidden vocabs)
+FROM {{SRC}}concept_ancestor ca
+JOIN {{SRC}}concept c ON c.concept_id = ca.descendant_concept_id
+WHERE ca.ancestor_concept_id IN (SELECT concept_id FROM seed_concepts)
+  AND ({{MAX_DEPTH}} = 0 OR ca.min_levels_of_separation <= {{MAX_DEPTH}})
+  AND c.vocabulary_id NOT IN ({{HIDE_VOCABS}})
+UNION
+SELECT concept_id                            -- complete chosen vocabs (used only)
+FROM {{SRC}}concepts_with_counts
+WHERE vocabulary_id IN ({{COMPLETE_VOCABS}})
+  AND total_cnt > 0;
+
+-- ---------------------------------------------------------------------------
+-- 3. concepts + counts → concepts_with_counts.parquet  (concept metadata)
+--    Over the FULL universe (seed + descendants), so the authoring/hierarchy
+--    views can show descendant concepts not directly in any cset.
+-- ---------------------------------------------------------------------------
+COPY (
+  SELECT *
+  FROM {{SRC}}concepts_with_counts
+  WHERE concept_id IN (SELECT concept_id FROM concept_universe)
+) TO '{{OUT}}/concepts_with_counts.parquet' (FORMAT parquet);
+
+-- ---------------------------------------------------------------------------
+-- 4. graph edges → concept_graph.parquet  (the hierarchy; replaces the pickle)
+--    concept_graph = concept_ancestor WHERE min_levels_of_separation = 1
+--    (direct parent→child edges). Both endpoints within the universe.
+-- ---------------------------------------------------------------------------
+COPY (
+  SELECT ancestor_concept_id   AS source_id,
+         descendant_concept_id AS target_id
+  FROM {{SRC}}concept_ancestor
+  WHERE min_levels_of_separation = 1
+    AND ancestor_concept_id   IN (SELECT concept_id FROM concept_universe)
+    AND descendant_concept_id IN (SELECT concept_id FROM concept_universe)
+) TO '{{OUT}}/concept_graph.parquet' (FORMAT parquet);
+
+-- ---------------------------------------------------------------------------
+-- 4b. researchers → researcher.parquet  (author/reviewer names on cset cards)
+--     Scoped to the multipassIds actually referenced by the kept csets' four
+--     populated researcher columns (reviewed_by/n3c_reviewer are all-NULL in
+--     this dataset — see queries.js RESEARCHER_COLS). The frontend keys these by
+--     multipassId and shows name/email/institution.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE TEMP TABLE researcher_ids AS
+SELECT DISTINCT mp AS "multipassId"
+FROM (
+  SELECT codeset_created_by     AS mp FROM {{SRC}}all_csets WHERE codeset_id IN (SELECT codeset_id FROM demo_codesets)
+  UNION ALL
+  SELECT container_created_by   AS mp FROM {{SRC}}all_csets WHERE codeset_id IN (SELECT codeset_id FROM demo_codesets)
+  UNION ALL
+  SELECT assigned_informatician AS mp FROM {{SRC}}all_csets WHERE codeset_id IN (SELECT codeset_id FROM demo_codesets)
+  UNION ALL
+  SELECT assigned_sme           AS mp FROM {{SRC}}all_csets WHERE codeset_id IN (SELECT codeset_id FROM demo_codesets)
+) t
+WHERE mp IS NOT NULL;
+
+COPY (
+  SELECT * FROM {{SRC}}researcher
+  WHERE "multipassId" IN (SELECT "multipassId" FROM researcher_ids)
+) TO '{{OUT}}/researcher.parquet' (FORMAT parquet);
+
+-- ---------------------------------------------------------------------------
+-- 5. tiny lookups → export whole.
+-- ---------------------------------------------------------------------------
+COPY (SELECT * FROM {{SRC}}vocabulary)   TO '{{OUT}}/vocabulary.parquet'   (FORMAT parquet);
+COPY (SELECT * FROM {{SRC}}domain)       TO '{{OUT}}/domain.parquet'       (FORMAT parquet);
+COPY (SELECT * FROM {{SRC}}relationship) TO '{{OUT}}/relationship.parquet' (FORMAT parquet);
+
+-- ---------------------------------------------------------------------------
+-- 6. sanity report — watch 'concepts_universe' vs 'concepts_seed' to see how
+--    much the descendant expansion adds at the chosen MAX_DEPTH.
+-- ---------------------------------------------------------------------------
+SELECT 'max_depth (0=full)'      AS metric, {{MAX_DEPTH}}                          AS n
+UNION ALL SELECT 'bundle_csets_pre_version', (SELECT COUNT(*) FROM bundle_ids)
+UNION ALL SELECT 'value_sets',               (SELECT COUNT(*) FROM bundle_names)
+UNION ALL SELECT 'csets_kept',               (SELECT COUNT(*) FROM demo_codesets)
+UNION ALL SELECT 'member_rows',              (SELECT COUNT(*) FROM {{SRC}}cset_members_items WHERE codeset_id IN (SELECT codeset_id FROM demo_codesets))
+UNION ALL SELECT 'concepts_seed',            (SELECT COUNT(*) FROM seed_concepts)
+UNION ALL SELECT 'concepts_universe',        (SELECT COUNT(*) FROM concept_universe)
+UNION ALL SELECT 'graph_edges',              (SELECT COUNT(*) FROM {{SRC}}concept_ancestor
+                                               WHERE min_levels_of_separation = 1
+                                                 AND ancestor_concept_id   IN (SELECT concept_id FROM concept_universe)
+                                                 AND descendant_concept_id IN (SELECT concept_id FROM concept_universe));
