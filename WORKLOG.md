@@ -47,6 +47,15 @@ Newest first.
 - Siggie's FORMAT note: class/slot/enum in FORMAT and code, entity/attribute/
   permissible value only in BDCHM tour content. Read "code" as dmvd's anchor
   kinds (`entity-row`, …); not confirmed.
+- 2026-09-29: Siggie withdrew that note: class/slot/enum was about a future
+  generic LinkML Explorer, conflated with the generic package spec. Package
+  FORMAT is now fully generic; dmvd's resolver/widget/color/anchor/URL-param
+  tables go to a dmvd authoring reference; vs-hub's contents deferred until the
+  generic spec exists. `@sigfried` confirmed as Siggie's existing npm user
+  (registry `/-/org/sigfried/package` lists supergroup etc.; `npm view` was
+  blocked by a `~/.npm` permission error in the sandbox). Added §4.8 setup:
+  subtree from LOCAL clones (no network, carries unpushed commits); Siggie runs
+  `pnpm install` (global store + registry are outside the sandbox).
 
 
 ---
