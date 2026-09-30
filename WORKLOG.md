@@ -63,3 +63,29 @@
   (which holds only `store/`); `pnpm store path` and a frozen install then
   used `~/Library/pnpm/store/v10`. Pinning `store-dir` in the repo was
   rejected — it would commit a machine path.
+
+## 2026-09-30 — design of the package split (PLAN §3.1)
+
+- Read all of `apps/dmvd/src/help/`, its call sites and the tests, then wrote
+  the split's design into [docs/PLAN.md](docs/PLAN.md) §3.1 rather than
+  starting code: Siggie asked whether to plan first and implement in a fresh
+  session, since this one was long and mostly setup.
+- Found the plan wrong about the tour's host callbacks: it named
+  `onApplyState`/`onReadState` (the absolute-state model dmvd removed on
+  2026-08-27); the code has `onPushChange`/`onPopChange`/`onJumpChanges`/
+  `onTourStart`/`onTourEnd`. Fixed in §3's table and §5.
+- Judgement calls in §3.1 that were NOT obvious, with the reason:
+  - `<Prose>` not `<HelpMarkdown>`/`<Markdown>`: the package isn't "help", and
+    `Markdown` clashes with react-markdown's default import at call sites.
+  - Cut entry lines at `Beats:` in the tour parser, instead of giving generic
+    field readers a stop-at option: keeps markdown and anchor ignorant of
+    beats with identical output (beat fields are indented; `extractField`
+    today stops at a `beats` field by name, parked or not).
+  - Help-mode remainder reads `content` from the tour context rather than
+    reparsing: temporary, dmvd-internal, avoids a second fill pass.
+  - `Once:` in anchor, not markdown or tour: width must be computed from the
+    stripped text, and any popover can carry one.
+  - Keep `help-*` class names through the split: renaming touches dmvd's
+    theme, e2e and tests, and would muddy "each stage changed nothing".
+- `CLAUDE.md`'s symlink-trap note said to expect it on the first vitest run;
+  it did not happen, and the note now says so.

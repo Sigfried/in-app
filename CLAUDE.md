@@ -63,10 +63,12 @@ The plan for what gets built here is [docs/PLAN.md](docs/PLAN.md).
 
 ## Known traps
 
-- **pnpm's `node_modules` is symlinks.** A symlinked `node_modules` has broken
-  vitest under the Claude Code sandbox before (dmvd worktrees): the sandbox's
-  allowed paths are matched against *real* paths. Expect to resolve real paths
-  (`pwd -P`) and adjust the allowlist.
+- **pnpm's `node_modules` is symlinks.** A symlinked `node_modules` broke
+  vitest under the Claude Code sandbox once in dmvd's worktrees, because the
+  sandbox matches allowed paths against *real* paths. It did not happen here:
+  dmvd's first vitest run under pnpm passed. If a sandbox write under
+  `node_modules` is refused, resolve the real path (`pwd -P`) before assuming
+  anything else.
 - **Node 24.** Pinned in [.nvmrc](.nvmrc) (24.2.0). On node 26, 41 of dmvd's
   tests fail (jsdom `localStorage`). vs-hub's deploy workflow also uses 24.
 - **vs-hub brings its data.** `apps/vs-hub/data/` is ~45 MB of committed
