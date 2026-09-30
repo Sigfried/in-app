@@ -5,3 +5,7 @@ dist/
 .nx/workspace-data
 *.log
 .DS_Store
+
+.nx/polygraph
+.claude/worktrees
+.claude/settings.local.json

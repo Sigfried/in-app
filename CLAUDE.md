@@ -71,9 +71,19 @@ The plan for what gets built here is [docs/PLAN.md](docs/PLAN.md).
   tests fail (jsdom `localStorage`). vs-hub's deploy workflow also uses 24.
 - **vs-hub brings its data.** `apps/vs-hub/data/` is ~45 MB of committed
   Parquet.
-- **`pnpm install` can't run inside the sandbox.** It writes to pnpm's global
-  store (`~/Library/pnpm/store`) and needs the npm registry. Siggie runs
-  installs in their own shell.
+- **`pnpm install` runs inside the sandbox** because
+  [.claude/settings.json](.claude/settings.json) allows writes to
+  `~/Library/pnpm` and `~/Library/Caches/pnpm`, and the `registry.npmjs.org`
+  domain. It must be all of `~/Library/pnpm`, not just its `store/`: pnpm
+  tests the parent, and when it can't write there it silently picks an
+  in-repo `.pnpm-store`, then wants to delete `node_modules` to reinstall
+  against it.
+- **`~/.npmrc` is hidden from the sandbox**, so the npm auth token in it can't
+  be used: that is what makes allowing the registry domain safe. Every pnpm
+  command warns `EPERM ... .npmrc`; that warning is expected.
+- **nx works in the sandbox** through the socket allowances for `/tmp/.nx` in
+  the same settings file. Run tasks through nx (`pnpm nx run-many -t build`),
+  not around it.
 - **No work in the original clones while absorbed.** A commit in
   `~/github-repos/dynamic-model-var-docs` or `personal/vs-hub` would diverge
   from `apps/*`. The dmvd dev server moves too: run it from `apps/dmvd`.

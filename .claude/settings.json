@@ -1,0 +1,20 @@
+{
+  "sandbox": {
+    "network": {
+      "allowedDomains": ["registry.npmjs.org"],
+      "allowUnixSockets": ["/tmp/.nx", "~/.nx"]
+    },
+    "filesystem": {
+      "allowRead": ["/tmp/.nx", "~/.nx"],
+      "allowWrite": ["/tmp/.nx", "~/.nx", "~/Library/pnpm", "~/Library/Caches/pnpm"]
+    },
+    "credentials": {
+      "files": [
+        { "path": "~/.npmrc", "mode": "deny" }
+      ]
+    }
+  },
+  "permissions": {
+    "deny": ["Bash(npm publish:*)", "Bash(pnpm publish:*)", "Bash(pnpm -r publish:*)"]
+  }
+}
