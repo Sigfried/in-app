@@ -89,3 +89,7 @@
     theme, e2e and tests, and would muddy "each stage changed nothing".
 - `CLAUDE.md`'s symlink-trap note said to expect it on the first vitest run;
   it did not happen, and the note now says so.
+
+- Siggie accepted the markdown-owns-the-document-structure answer (not the
+  one-parser-per-package alternative). PLAN §1 lists it as decided; the §2
+  box and the "provisional" wording in §3.1 were rewritten to state it.

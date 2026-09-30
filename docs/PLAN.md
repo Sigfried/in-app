@@ -1,8 +1,8 @@
 # Help/Tour packages — plan
 
-**How to read this for review.** Boxes marked **DECIDE** need a call from
-Siggie; boxes marked **PROPOSED** are Claude's recommendation, waiting for a
-yes/no. Everything else is either decided (§1) or a fact about the current code.
+**How to read this.** Boxes marked **CHECK** are facts still to verify.
+Decisions are in §1, and §3.1 is Claude's design for the split, not yet
+reviewed. Everything else is a fact about the current code.
 
 ---
 
@@ -30,6 +30,10 @@ Decided (Siggie, 2026-09-28):
 - **The live sites freeze** while their apps are in the monorepo. vs-hub
   (GitHub Actions) and dmvd (`npm run deploy`) are not redeployed until each is
   split back out to its own repo.
+
+Decided (Siggie, 2026-09-30):
+
+- **The markdown package owns the content-file structure** (§2).
 
 ---
 
@@ -63,20 +67,17 @@ Today's entry point is `<HelpMarkdown>`
 ([`HelpMarkdown.tsx`](../apps/dmvd/src/help/HelpMarkdown.tsx)); dmvd's legend already
 renders through it.
 
-> **DECIDE — who owns the content-file format?** *Provisionally answered with
-> the PROPOSED option below (Claude, 2026-09-30, unattended); see §3.1.
-> Siggie to confirm.* Today one file
-> ([`help-content.md`](../apps/dmvd/src/explore/help-content.md)) holds `## sections` of
-> `### entries`, each with `- **Field:** value` lines, and **one entry can be a
-> help topic and a tour step at once**. With separate packages, something has
-> to own that section/entry/field structure.
->
-> **PROPOSED:** the markdown package owns the *document* structure (sections,
-> entries, fields, `Description:` blocks) as a generic parser; tour and help
-> each declare the fields they read (`Change:`, `Anchor:`, beats, …). The
-> alternative —
-> each package parses its own file — is simpler per package but means an
-> element that is both explained and toured is written twice.
+### Who owns the content-file format
+
+One content file ([`help-content.md`](../apps/dmvd/src/explore/help-content.md))
+holds `## sections` of `### entries`, each with `- **Field:** value` lines, and
+**one entry can be a help topic and a tour step at once**.
+
+**The markdown package owns that document structure** (sections, entries,
+fields, `Description:` blocks) as a generic parser, and tour and help each
+declare the fields they read (`Change:`, `Anchor:`, beats, …). Siggie,
+2026-09-30. It is one parser rather than one per package so that an element
+that is both explained and toured is written once.
 
 ---
 
@@ -117,8 +118,8 @@ happens there with dmvd's app and tests to check against:
 
 Worked out by Claude on 2026-09-30, while Siggie had said to run unattended,
 after reading all of `src/help/`, its dmvd call sites and its tests.
-**Everything here is a proposal Siggie has not reviewed**, including the
-answer to §2's DECIDE box. Each stage is its own commit, so any of it can be
+**Siggie has not reviewed it**, apart from the content-file decision it
+builds on (§2). Each stage is its own commit, so any of it can be
 revisited without unpicking the rest.
 
 #### What goes where
@@ -132,8 +133,7 @@ revisited without unpicking the rest.
 - `WidgetRenderer` (now in `helpContext.ts`) and `ColorMap`.
 - `<HelpMarkdown>` becomes **`<Prose>`**. The package is no longer "help", and
   `Markdown` would clash with react-markdown's default import in callers.
-- **The generic content-document parser** (§2's DECIDE, answered with its
-  PROPOSED option): `parseDocument(markdown, { skipSections })` returns
+- **The generic content-document parser** (§2): `parseDocument(markdown, { skipSections })` returns
   sections with their body lines, and entries with `id`, file `order` and raw
   `lines`. The field readers move with it: `fieldOf` (bold-optional,
   case-insensitive, `~~parked~~`), `readField`, `readBlockField`,
